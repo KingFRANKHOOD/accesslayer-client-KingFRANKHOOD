@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import type { Course } from '@/services/course.service';
 import CreatorInitialsAvatar from '@/components/common/CreatorInitialsAvatar';
 import Change24hBadge from '@/components/common/Change24hBadge';
+import ReputationScoreBadge from '@/components/common/ReputationScoreBadge';
 import { normalizeCreatorDisplayName } from '@/utils/creatorDisplayName.utils';
 import { formatCreatorHandle } from '@/utils/handleDisplay.utils';
 import { formatCreatorKeyPriceDisplay } from '@/utils/keyPriceDisplay.utils';
@@ -117,6 +118,11 @@ export const DiscoveryKeyCard: React.FC<DiscoveryKeyCardProps> = ({
 						{priceFormatted}
 					</span>
 				</div>
+			</div>
+
+			{/* Composite reputation score badge (#1143) */}
+			<div className="relative z-20 mt-2 flex justify-end">
+				<ReputationScoreBadge keyId={creator.id} />
 			</div>
 		</article>
 	);
