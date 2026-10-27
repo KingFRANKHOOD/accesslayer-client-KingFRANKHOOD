@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAccount } from 'wagmi';
-import { ShieldAlert } from 'lucide-react';
+import { ShieldAlert, Snowflake } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { StableButtonContent } from '@/components/ui/stable-button-content';
 import {
@@ -19,6 +19,7 @@ import {
 	BottomSheetTitle,
 } from '@/components/ui/bottom-sheet';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import type { KeyFreezeStatus } from '@/hooks/useKeyFreeze';
 import { cn } from '@/lib/utils';
 import { formatNumber } from '@/utils/numberFormat.utils';
 import {
@@ -35,6 +36,7 @@ import LaunchPenaltyWarning from '@/components/common/LaunchPenaltyWarning';
 import SlippageToleranceSelector from '@/components/common/SlippageToleranceSelector';
 import PriceImpactWarning from '@/components/common/PriceImpactWarning';
 import TradeConfirmationModal from '@/components/common/TradeConfirmationModal';
+import { useFeeDiscount } from '@/hooks/useFeeDiscount';
 import {
 	TRADE_FEE_ESTIMATE,
 	FEE_BOUNDS,
@@ -138,6 +140,16 @@ export interface TradeDialogProps {
 	requireConfirmation?: boolean;
 	/** True when an admin has paused trading for this specific key (#777). */
 	tradingPaused?: boolean;
+	/**
+	 * Active admin freeze on this key (#1121). While set, the amount input
+	 * and confirm button are disabled and the freeze reason is surfaced as
+	 * the tooltip and an inline alert.
+	 */
+	keyFreeze?: KeyFreezeStatus | null;
+	/** Configured price floor in stroops (#1152). */
+	priceFloorStroops?: number | null;
+	/** Whether the price floor is active (spot <= floor) (#1152). */
+	priceFloorActive?: boolean;
 	/** Optional XLM/USD spot rate for the confirmation fee USD equivalent (#994). */
 	xlmUsdRate?: number | null;
 	onOpenChange: (open: boolean) => void;
@@ -177,6 +189,9 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 	circuitBreakerThresholdBps,
 	requireConfirmation = false,
 	tradingPaused = false,
+	keyFreeze = null,
+	priceFloorStroops = null,
+	priceFloorActive,
 	xlmUsdRate = null,
 	onOpenChange,
 	onConfirm,
@@ -235,6 +250,9 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 	);
 	const [confirmationOpen, setConfirmationOpen] = useState(false);
 	const amountInputRef = useRef<HTMLInputElement | null>(null);
+
+	// Loyalty fee discount (#1173) — shown on the buy confirmation step.
+	const { data: feeDiscount } = useFeeDiscount(activeAddress);
 	const pricePreviewFailureLogged = useRef(false);
 	const previewAbortControllerRef = useRef<AbortController | null>(null);
 	// Capture whatever had focus right before dialog opened; restore on close.
@@ -242,6 +260,16 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 	const { paused: globalPaused } = useGlobalPause();
 	// Trading is blocked by a platform-wide pause OR a pause on this key (#777).
 	const paused = globalPaused || tradingPaused;
+	// Admin freeze on this key (#1121) blocks trading with freeze-specific copy.
+	const frozen = keyFreeze != null;
+	// Price floor active (#1152) blocks sell trades when spot price <= floor price.
+	const isFloorActive =
+		priceFloorActive ??
+		(keyPriceStroops != null &&
+		priceFloorStroops != null &&
+		priceFloorStroops > 0
+			? keyPriceStroops <= priceFloorStroops
+			: false);
 
 	// On open: reset state, kick off allowance check + cap fetch.
 	useEffect(() => {
@@ -365,6 +393,10 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 		if (!Number.isFinite(parsedAmount))
 			return 'Amount must be a valid number.';
 		if (parsedAmount <= 0) return 'Amount must be greater than zero.';
+		if (keyFreeze)
+			return `${keyFreeze.reason} Trading resumes when the freeze lifts.`;
+		if (side === 'sell' && isFloorActive)
+			return 'PriceFloorActive: Selling is disabled while current price is at or below the floor price.';
 		if (isPaused)
 			return 'Trading is currently suspended because the contract is paused.';
 		if (side === 'buy' && atCap)
@@ -399,6 +431,8 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 		maxBuyQuantity,
 		availableSupply,
 		isPaused,
+		keyFreeze,
+		isFloorActive,
 	]);
 
 	const amountValid = validationError === null;
@@ -475,6 +509,8 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 		exceedsLiquidityDepth ||
 		atCap ||
 		isPaused ||
+		frozen ||
+		(side === 'sell' && isFloorActive) ||
 		requiresAllowanceApproval;
 
 	const displayCreatorName =
@@ -495,16 +531,22 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 				? 'Circuit Breaker Tripped'
 				: atCap
 					? 'Cap reached'
-					: isPaused
-						? 'Contract paused'
-						: 'Confirm buy'
-			: isPaused
-				? 'Contract paused'
-				: side === 'sell'
-					? 'Confirm sell'
-					: side === 'stake'
-						? 'Confirm stake'
-						: 'Confirm transfer';
+					: frozen
+						? 'Key frozen'
+						: isPaused
+							? 'Contract paused'
+							: 'Confirm buy'
+			: frozen
+				? 'Key frozen'
+				: isPaused
+					? 'Contract paused'
+					: side === 'sell' && isFloorActive
+						? 'Price Floor Active'
+						: side === 'sell'
+							? 'Confirm sell'
+						: side === 'stake'
+							? 'Confirm stake'
+							: 'Confirm transfer';
 
 	const estimatedNetworkFee = formatTransactionFeeDisplay(
 		networkFeeEstimate.status === 'success'
@@ -865,6 +907,61 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 
 	const bodyContent = (
 		<>
+			{/* Key frozen alert (#1121) */}
+			{keyFreeze && (
+				<div
+					role="alert"
+					data-testid="trade-dialog-freeze-alert"
+					className="flex items-start gap-2.5 rounded-xl border border-orange-500/30 bg-orange-500/10 p-3 text-xs text-orange-200"
+				>
+					<Snowflake
+						className="mt-0.5 size-4 shrink-0 text-orange-400"
+						aria-hidden="true"
+					/>
+					<div>
+						<p className="font-semibold text-orange-300">
+							Trading frozen — this key is frozen
+						</p>
+						<p
+							className="mt-0.5 text-orange-200/80"
+							data-testid="trade-dialog-freeze-reason"
+						>
+							{keyFreeze.reason}{' '}
+							{keyFreeze.expiresAt
+								? `Freeze lifts on ${new Date(
+										keyFreeze.expiresAtMs ?? keyFreeze.expiresAt
+									).toLocaleString()}.`
+								: 'The freeze is indefinite.'}
+						</p>
+					</div>
+				</div>
+			)}
+
+			{/* Price floor active alert (#1152) */}
+			{side === 'sell' && isFloorActive && (
+				<div
+					role="alert"
+					data-testid="trade-dialog-price-floor-alert"
+					className="flex items-start gap-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200"
+				>
+					<ShieldAlert
+						className="mt-0.5 size-4 shrink-0 text-rose-400"
+						aria-hidden="true"
+					/>
+					<div>
+						<p className="font-semibold text-rose-300">
+							Price Floor Active
+						</p>
+						<p
+							className="mt-0.5 text-rose-200/80"
+							data-testid="trade-dialog-price-floor-reason"
+						>
+							PriceFloorActive: Selling is disabled because current price is at or below the configured floor price{priceFloorStroops != null ? ` (${formatDisplayKeyPrice(priceFloorStroops)})` : ''}.
+						</p>
+					</div>
+				</div>
+			)}
+
 			{/* Contract paused alert (#953) */}
 			{isPaused && (
 				<div
@@ -929,12 +1026,14 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 							setAdjustmentNote(null);
 						}}
 						onBlur={handleBlur}
-						disabled={isSubmitting || atCap || isPaused}
+						disabled={isSubmitting || atCap || isPaused || frozen || (side === 'sell' && isFloorActive)}
 						className={cn(
 							'w-full rounded-xl border bg-white/[0.04] px-3 py-2 pr-16 text-white outline-none transition-colors',
 							'border-white/10 focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/15',
 							showError ? 'border-red-500/60' : '',
-							atCap || isPaused ? 'opacity-40 cursor-not-allowed' : ''
+							atCap || isPaused || frozen || (side === 'sell' && isFloorActive)
+								? 'opacity-40 cursor-not-allowed'
+								: ''
 						)}
 						aria-label="Trade amount"
 						aria-describedby={
@@ -949,7 +1048,9 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 						data-testid="trade-dialog-max-button"
 						onClick={handleMaxClick}
 						disabled={
-							isSubmitting || (side === 'sell' && availableHoldings <= 0)
+							isSubmitting ||
+							frozen ||
+							(side === 'sell' && (availableHoldings <= 0 || isFloorActive))
 						}
 						className="absolute right-2 rounded-md border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-xs font-bold text-amber-300 transition-colors hover:bg-amber-400/20 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
 					>
@@ -1037,6 +1138,7 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 						breakdown={pricePreview}
 						isLoading={previewLoading}
 						error={previewError}
+						feeDiscount={feeDiscount ?? null}
 						onRetry={() => {
 							setPreviewError(null);
 							setPreviewLoading(true);
@@ -1060,11 +1162,13 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 
 				{amountValid && (
 					<div className="mt-3 border-t border-white/10 pt-3">
-						<SlippageToleranceSelector
-							value={slippageTolerancePercent}
-							onChange={setSlippageTolerancePercent}
-							disabled={isSubmitting}
-						/>
+						{!confirmationOpen && (
+							<SlippageToleranceSelector
+								value={slippageTolerancePercent}
+								onChange={setSlippageTolerancePercent}
+								disabled={isSubmitting}
+							/>
+						)}
 						{slippageBounds && (
 							<p
 								className="mt-2 text-[0.7rem] text-white/45"
@@ -1093,11 +1197,13 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 										)}
 							</p>
 						)}
-						<PriceImpactWarning
-							impactPercent={priceImpactPercent}
-							threshold={PRICE_IMPACT_THRESHOLD_PERCENT}
-							className="mt-2"
-						/>
+						{!confirmationOpen && (
+							<PriceImpactWarning
+								impactPercent={priceImpactPercent}
+								threshold={PRICE_IMPACT_THRESHOLD_PERCENT}
+								className="mt-2"
+							/>
+						)}
 					</div>
 				)}
 			</div>
@@ -1125,7 +1231,18 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 			>
 				Cancel
 			</Button>
-			<UnavailableAction disabled={paused} reason="Trading is currently paused">
+			<UnavailableAction
+				disabled={frozen || paused || (side === 'sell' && isFloorActive)}
+				reason={
+					keyFreeze
+						? keyFreeze.reason
+						: globalPaused
+							? 'Platform Paused'
+							: side === 'sell' && isFloorActive
+								? 'PriceFloorActive: Selling is disabled while current price is at or below the floor price.'
+								: 'Trading is currently paused'
+				}
+			>
 				<Button
 					type="button"
 					onClick={handleConfirm}
@@ -1134,7 +1251,9 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 						isSubmitting ||
 						exceedsLiquidityDepth ||
 						(side === 'buy' && (previewLoading || previewError != null)) ||
-						paused
+						paused ||
+						frozen ||
+						(side === 'sell' && isFloorActive)
 					}
 					aria-busy={isSubmitting || undefined}
 					data-focus-order="3"
@@ -1166,6 +1285,7 @@ const TradeDialog: React.FC<TradeDialogProps> = ({
 				feeError={feeRateError}
 				onFeeRetry={handleFeeRateRetry}
 				slippageTolerancePercent={slippageTolerancePercent}
+				onSlippageChange={setSlippageTolerancePercent}
 				maxPriceStroops={slippageBounds?.maxPriceStroops ?? null}
 				minPriceStroops={slippageBounds?.minPriceStroops ?? null}
 				priceImpactPercent={priceImpactPercent}

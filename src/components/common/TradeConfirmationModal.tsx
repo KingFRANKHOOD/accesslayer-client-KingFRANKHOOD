@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
 	Dialog,
 	DialogContent,
@@ -13,7 +13,16 @@ import { formatNumber } from '@/utils/numberFormat.utils';
 import { formatDisplayKeyPrice } from '@/utils/keyPriceDisplay.utils';
 import PriceImpactWarning from '@/components/common/PriceImpactWarning';
 import DynamicFeeBreakdown from '@/components/common/DynamicFeeBreakdown';
-import { isHighPriceImpact } from '@/utils/priceImpact.utils';
+import SlippageToleranceSelector from '@/components/common/SlippageToleranceSelector';
+import {
+	formatPriceImpact,
+	isHighPriceImpact,
+	PRICE_IMPACT_THRESHOLD_PERCENT,
+} from '@/utils/priceImpact.utils';
+import {
+	computeMaxPriceStroops,
+	computeMinPriceStroops,
+} from '@/utils/slippageTolerance.utils';
 import type { DynamicFeeBreakdown as DynamicFeeBreakdownData } from '@/utils/dynamicFeeRate.utils';
 import { ShieldCheck, ArrowRight, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -26,7 +35,11 @@ export interface TradeConfirmationModalProps {
 	amount: number;
 	unitPriceStroops?: number | null;
 	totalStroops?: number | null;
+	feeStroops?: number | null;
+	netReceivedStroops?: number | null;
+	priceImpactBps?: number | null;
 	slippageTolerancePercent: number;
+	onSlippageChange?: (percent: number) => void;
 	maxPriceStroops?: number | null;
 	minPriceStroops?: number | null;
 	priceImpactPercent?: number | null;
@@ -44,8 +57,9 @@ export interface TradeConfirmationModalProps {
 }
 
 /**
- * Trade confirmation modal showing max_price/min_price bounds and slippage
- * protection controls before transaction submission (#919).
+ * Trade confirmation modal showing price breakdown, estimated output, price impact bps,
+ * fee, net received, max_price/min_price bounds and adjustable slippage protection
+ * controls before transaction submission (#919, #1112).
  */
 export const TradeConfirmationModal: React.FC<TradeConfirmationModalProps> = ({
 	open,
@@ -55,7 +69,11 @@ export const TradeConfirmationModal: React.FC<TradeConfirmationModalProps> = ({
 	amount,
 	unitPriceStroops,
 	totalStroops,
+	feeStroops,
+	netReceivedStroops,
+	priceImpactBps,
 	slippageTolerancePercent,
+	onSlippageChange,
 	maxPriceStroops,
 	minPriceStroops,
 	priceImpactPercent,
@@ -67,9 +85,47 @@ export const TradeConfirmationModal: React.FC<TradeConfirmationModalProps> = ({
 	onCancel,
 	isSubmitting = false,
 }) => {
+	const [currentSlippage, setCurrentSlippage] = useState(
+		slippageTolerancePercent
+	);
+
+	useEffect(() => {
+		setCurrentSlippage(slippageTolerancePercent);
+	}, [slippageTolerancePercent]);
+
+	const handleSlippageChange = (nextPercent: number) => {
+		setCurrentSlippage(nextPercent);
+		onSlippageChange?.(nextPercent);
+	};
+
 	const isBuy = side === 'buy';
 	const title = isBuy ? 'Confirm Buy Order' : 'Confirm Sell Order';
 	const confirmButtonLabel = isBuy ? 'Confirm Buy' : 'Confirm Sell';
+
+	const resolvedMaxPriceStroops =
+		currentSlippage !== slippageTolerancePercent && totalStroops != null
+			? computeMaxPriceStroops(totalStroops, currentSlippage)
+			: maxPriceStroops;
+	const resolvedMinPriceStroops =
+		currentSlippage !== slippageTolerancePercent && totalStroops != null
+			? computeMinPriceStroops(totalStroops, currentSlippage)
+			: minPriceStroops;
+
+	const resolvedFeeStroops =
+		feeStroops ?? feeBreakdown?.totalFeeStroops ?? 0;
+	const resolvedNetReceivedStroops =
+		netReceivedStroops ??
+		feeBreakdown?.netProceedsStroops ??
+		(totalStroops != null
+			? isBuy
+				? totalStroops + resolvedFeeStroops
+				: Math.max(0, totalStroops - resolvedFeeStroops)
+			: null);
+	const resolvedPriceImpactBps =
+		priceImpactBps ??
+		(priceImpactPercent != null
+			? Math.round(Math.abs(priceImpactPercent) * 100)
+			: 0);
 
 	const handleCancel = () => {
 		if (isSubmitting) return;
@@ -133,12 +189,14 @@ export const TradeConfirmationModal: React.FC<TradeConfirmationModalProps> = ({
 							</span>
 						</div>
 						<div className="flex items-center justify-between text-sm">
-							<span className="text-white/60">Quantity</span>
+							<span className="text-white/60">Input Amount</span>
 							<span
 								className="font-mono font-semibold text-white"
 								data-testid="confirmation-modal-amount"
 							>
-								{formatNumber(amount)} {amount === 1 ? 'key' : 'keys'}
+								<span data-testid="confirmation-modal-input-amount">
+									{formatNumber(amount)} {amount === 1 ? 'key' : 'keys'}
+								</span>
 							</span>
 						</div>
 						{unitPriceStroops != null && (
@@ -152,13 +210,52 @@ export const TradeConfirmationModal: React.FC<TradeConfirmationModalProps> = ({
 						{totalStroops != null && (
 							<div className="flex items-center justify-between border-t border-white/5 pt-2 text-sm">
 								<span className="text-white/70 font-medium">
-									{isBuy ? 'Estimated Total' : 'Estimated Proceeds'}
+									{isBuy ? 'Estimated Total' : 'Estimated Output'}
 								</span>
 								<span
 									className="font-mono text-base font-bold text-amber-300"
 									data-testid="confirmation-modal-total"
 								>
-									{formatDisplayKeyPrice(totalStroops)}
+									<span data-testid="confirmation-modal-estimated-output">
+										{formatDisplayKeyPrice(totalStroops)}
+									</span>
+								</span>
+							</div>
+						)}
+						<div className="flex items-center justify-between text-sm">
+							<span className="text-white/60">Price Impact</span>
+							<span
+								className="font-mono text-white/90"
+								data-testid="confirmation-modal-price-impact"
+							>
+								{formatPriceImpact(priceImpactPercent ?? 0)} (
+								<span data-testid="confirmation-modal-price-impact-bps">
+									{resolvedPriceImpactBps} bps
+								</span>
+								)
+							</span>
+						</div>
+						<div className="flex items-center justify-between text-sm">
+							<span className="text-white/60">Fee</span>
+							<span
+								className="font-mono text-white/90"
+								data-testid="confirmation-modal-fee"
+							>
+								{formatDisplayKeyPrice(resolvedFeeStroops)}
+							</span>
+						</div>
+						{resolvedNetReceivedStroops != null && (
+							<div className="flex items-center justify-between border-t border-white/5 pt-2 text-sm">
+								<span className="text-white/70 font-medium">
+									Net Received
+								</span>
+								<span
+									className="font-mono font-semibold text-emerald-300"
+									data-testid="confirmation-modal-net-received"
+								>
+									{isBuy
+										? `${formatNumber(amount)} ${amount === 1 ? 'key' : 'keys'} (${formatDisplayKeyPrice(resolvedNetReceivedStroops)})`
+										: formatDisplayKeyPrice(resolvedNetReceivedStroops)}
 								</span>
 							</div>
 						)}
@@ -188,11 +285,17 @@ export const TradeConfirmationModal: React.FC<TradeConfirmationModalProps> = ({
 								className="font-mono font-bold text-amber-300"
 								data-testid="confirmation-modal-slippage"
 							>
-								{slippageTolerancePercent}%
+								{currentSlippage}%
 							</span>
 						</div>
 
-						{isBuy && maxPriceStroops != null && (
+						<SlippageToleranceSelector
+							value={currentSlippage}
+							onChange={handleSlippageChange}
+							disabled={isSubmitting}
+						/>
+
+						{isBuy && resolvedMaxPriceStroops != null && (
 							<div className="flex items-center justify-between text-sm border-t border-amber-500/10 pt-2">
 								<div className="flex items-center gap-1 text-white/80">
 									<span className="font-medium">
@@ -203,12 +306,12 @@ export const TradeConfirmationModal: React.FC<TradeConfirmationModalProps> = ({
 									className="font-mono font-bold text-amber-300 text-sm"
 									data-testid="confirmation-modal-max-price"
 								>
-									{formatDisplayKeyPrice(maxPriceStroops)}
+									{formatDisplayKeyPrice(resolvedMaxPriceStroops)}
 								</span>
 							</div>
 						)}
 
-						{!isBuy && minPriceStroops != null && (
+						{!isBuy && resolvedMinPriceStroops != null && (
 							<div className="flex items-center justify-between text-sm border-t border-amber-500/10 pt-2">
 								<div className="flex items-center gap-1 text-white/80">
 									<span className="font-medium">
@@ -219,7 +322,7 @@ export const TradeConfirmationModal: React.FC<TradeConfirmationModalProps> = ({
 									className="font-mono font-bold text-amber-300 text-sm"
 									data-testid="confirmation-modal-min-price"
 								>
-									{formatDisplayKeyPrice(minPriceStroops)}
+									{formatDisplayKeyPrice(resolvedMinPriceStroops)}
 								</span>
 							</div>
 						)}
@@ -229,10 +332,10 @@ export const TradeConfirmationModal: React.FC<TradeConfirmationModalProps> = ({
 							<p>
 								{isBuy
 									? `Your transaction will revert if the total cost exceeds ${formatDisplayKeyPrice(
-											maxPriceStroops
+											resolvedMaxPriceStroops
 										)}.`
 									: `Your transaction will revert if the total proceeds fall below ${formatDisplayKeyPrice(
-											minPriceStroops
+											resolvedMinPriceStroops
 										)}.`}
 							</p>
 						</div>
@@ -242,12 +345,12 @@ export const TradeConfirmationModal: React.FC<TradeConfirmationModalProps> = ({
 					{priceImpactPercent != null &&
 						isHighPriceImpact(
 							priceImpactPercent,
-							slippageTolerancePercent
+							PRICE_IMPACT_THRESHOLD_PERCENT
 						) && (
 							<div data-testid="confirmation-modal-impact-warning">
 								<PriceImpactWarning
 									impactPercent={priceImpactPercent}
-									threshold={slippageTolerancePercent}
+									threshold={PRICE_IMPACT_THRESHOLD_PERCENT}
 								/>
 							</div>
 						)}

@@ -22,7 +22,10 @@ interface BidRowProps {
 
 function BidRow({ rank, bid, isMine }: BidRowProps) {
 	const placedAtLabel = useRelativeTime(bid.placedAt);
-	const bidderLabel = bid.bidderName || shortenWalletAddress(bid.bidderAddress);
+	const truncatedAddress = shortenWalletAddress(bid.bidderAddress);
+	const bidderLabel = bid.bidderName
+		? `${bid.bidderName} (${truncatedAddress})`
+		: truncatedAddress;
 
 	return (
 		<li

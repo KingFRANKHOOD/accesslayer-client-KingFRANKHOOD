@@ -24,14 +24,17 @@ interface AuctionBidPanelProps {
 	startingPrice?: number | null;
 	/** Disables bidding (e.g. once the auction window has closed). */
 	disabled?: boolean;
+	/** Optional user address override when passed from parent (#1164). */
+	userAddress?: string | null;
 }
 
 /**
- * Pre-launch auction bid input for the key detail page (#924).
+ * Pre-launch auction bid input for the key detail page (#924, #1164).
  *
- * Shows the current highest bid, the minimum increment and the minimum
- * acceptable bid, then validates the entered amount against that floor before
- * submitting `place_bid`. Requires a connected, non-mismatched wallet.
+ * Shows the current highest bid, the minimum increment, the minimum acceptable
+ * bid, and an escrowed funds notice. Validates the entered amount against that
+ * floor (rejecting bids below minimum with BelowMinimum inline error) before
+ * submitting `place_bid`.
  */
 const AuctionBidPanel: React.FC<AuctionBidPanelProps> = ({
 	creatorId,
@@ -39,15 +42,18 @@ const AuctionBidPanel: React.FC<AuctionBidPanelProps> = ({
 	minIncrement,
 	startingPrice,
 	disabled = false,
+	userAddress,
 }) => {
-	const { isConnected, address } = useAccount();
+	const { isConnected, address: wagmiAddress } = useAccount();
+	const activeAddress = userAddress ?? wagmiAddress;
+	const hasWallet = Boolean(activeAddress || isConnected);
+
 	const mutation = usePlaceAuctionBidMutation(creatorId);
 
 	const [bidInput, setBidInput] = useState('');
 	const [showError, setShowError] = useState(false);
 
-	// Clear the stale error/input once the highest bid moves (a poll picked up
-	// a higher bid) so the floor copy stays honest.
+	// Clear the stale error once highest bid moves
 	useEffect(() => {
 		setShowError(false);
 	}, [highestBid]);
@@ -59,29 +65,37 @@ const AuctionBidPanel: React.FC<AuctionBidPanelProps> = ({
 	});
 	const increment = resolveAuctionMinIncrement(minIncrement);
 
-	const { error: errorMessage, value } = validateAuctionBid(bidInput, {
+	const validation = validateAuctionBid(bidInput, {
 		highestBid,
 		minIncrement,
 		startingPrice,
 	});
-	const hasError = showError && !value;
+	const { error: errorMessage, value, isValid, errorCode } = validation;
+
+	// Show inline error if submitted with error or if typed below minimum
+	const isBelowMinimum =
+		bidInput.trim() !== '' && errorCode === 'BelowMinimum';
+	const hasError = (showError || isBelowMinimum) && !isValid;
 
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
 		if (mutation.isPending || disabled) return;
 
-		if (!isConnected || !address) {
+		if (!hasWallet) {
 			showToast.error('Connect your wallet to place a bid');
 			return;
 		}
 
-		if (value == null) {
+		if (!isValid || value == null) {
 			setShowError(true);
 			return;
 		}
 
 		mutation.mutate(value, {
-			onSuccess: () => setBidInput(''),
+			onSuccess: () => {
+				setBidInput('');
+				setShowError(false);
+			},
 		});
 	};
 
@@ -131,6 +145,19 @@ const AuctionBidPanel: React.FC<AuctionBidPanelProps> = ({
 				</div>
 			</div>
 
+			{/* Escrowed Funds Notice (#1164) */}
+			<div
+				data-testid="auction-escrow-notice"
+				className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] p-3 text-xs text-white/70"
+			>
+				<span className="font-semibold text-amber-300">
+					Escrowed Funds:
+				</span>{' '}
+				All bids are escrowed by the auction contract. If outbid, your funds
+				are released for refund; winning bids settle your key allocation
+				upon close.
+			</div>
+
 			<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
 				<label htmlFor="auction-bid" className="sr-only">
 					Your bid in XLM
@@ -159,7 +186,7 @@ const AuctionBidPanel: React.FC<AuctionBidPanelProps> = ({
 				>
 					{mutation.isPending
 						? 'Placing bid…'
-						: isConnected
+						: hasWallet
 							? 'Place Bid'
 							: 'Connect wallet to bid'}
 				</Button>
@@ -179,7 +206,8 @@ const AuctionBidPanel: React.FC<AuctionBidPanelProps> = ({
 				<p
 					role="alert"
 					data-testid="auction-bid-error"
-					className="text-xs text-red-400"
+					data-error-code={errorCode ?? undefined}
+					className="text-xs font-semibold text-rose-400"
 				>
 					{errorMessage}
 				</p>

@@ -24,6 +24,7 @@ import StakingDashboardPage from './pages/StakingDashboardPage';
 import RevenueDistributionHistoryPage from './pages/RevenueDistributionHistoryPage';
 import BundleManagementPage from './pages/BundleManagementPage';
 import CreatorRevenueDashboardPage from './pages/CreatorRevenueDashboardPage';
+import SpotlightAuctionPage from './pages/SpotlightAuctionPage';
 import AtomicSwapCreatePage from './pages/AtomicSwapCreatePage';
 import AtomicSwapProposalPage from './pages/AtomicSwapProposalPage';
 import StatusPage from './pages/StatusPage';
@@ -31,7 +32,13 @@ import HolderLeaderboardPage from './pages/HolderLeaderboardPage';
 import BundlesPage from './pages/BundlesPage';
 import BundleDetailPage from './pages/BundleDetailPage';
 import SearchResultsPage from './pages/SearchResultsPage';
+import KeyDiscoveryFeedPage from './pages/KeyDiscoveryFeedPage';
+import KeyDiscoveryLeaderboardPage from './pages/KeyDiscoveryLeaderboardPage';
+import WalletPortfolioPage from './pages/WalletPortfolioPage';
+import CampaignsPage from './pages/CampaignsPage';
 import AutoInvestDashboardPage from './pages/AutoInvestDashboardPage';
+import AirdropClaimsPage from './pages/AirdropClaimsPage';
+import ProtocolAnalyticsPage from './pages/ProtocolAnalyticsPage';
 import RouteErrorBoundary from './components/common/RouteErrorBoundary';
 
 function withRouteErrorBoundary(element: ReactNode, routeName: string) {
@@ -72,6 +79,24 @@ export const routes = [
 			{
 				path: '/discover',
 				element: <DiscoveryPage />,
+			},
+			{
+				// Key discovery feed with sort + category filters (#1113).
+				path: '/discovery/feed',
+				element: <KeyDiscoveryFeedPage />,
+			},
+			{
+				// Full list of seasonal campaigns linked from discovery (#1226).
+				path: '/campaigns',
+				element: <CampaignsPage />,
+			},
+			{
+				// Key discovery leaderboard ranking top performing keys (#1206).
+				path: '/discovery/leaderboard',
+				element: withRouteErrorBoundary(
+					<KeyDiscoveryLeaderboardPage />,
+					'Key discovery leaderboard'
+				),
 			},
 			{
 				path: '/leaderboard',
@@ -131,6 +156,14 @@ export const routes = [
 				element: <BundleManagementPage />,
 			},
 			{
+				path: '/creator/:id/spotlight',
+				element: <SpotlightAuctionPage />,
+			},
+			{
+				path: '/creators/:id/spotlight',
+				element: <SpotlightAuctionPage />,
+			},
+			{
 				path: '/creator/:id/revenue',
 				element: <CreatorRevenueDashboardPage />,
 			},
@@ -161,6 +194,14 @@ export const routes = [
 			{
 				path: '/profile/:wallet',
 				element: withRouteErrorBoundary(<ProfilePage />, 'Portfolio'),
+			},
+			{
+				// Wallet portfolio table with holdings + PnL breakdown (#1116).
+				path: '/portfolio',
+				element: withRouteErrorBoundary(
+					<WalletPortfolioPage />,
+					'Wallet portfolio'
+				),
 			},
 			{
 				path: '/following',
@@ -195,7 +236,23 @@ export const routes = [
 				element: <AutoInvestDashboardPage />,
 			},
 			{
+				// Airdrop claims page for key holders.
+				path: '/airdrop-claims',
+				element: withRouteErrorBoundary(
+					<AirdropClaimsPage />,
+					'Airdrop claims'
+				),
+			},
+			{
 				path: '/swap/create',
+				element: <AtomicSwapCreatePage />,
+			},
+			{
+				path: '/swap/pending',
+				element: <AtomicSwapCreatePage />,
+			},
+			{
+				path: '/swaps',
 				element: <AtomicSwapCreatePage />,
 			},
 			{
@@ -217,6 +274,14 @@ export const routes = [
 				// Public platform status page (#1051).
 				path: '/status',
 				element: <StatusPage />,
+			},
+			{
+				// Public protocol analytics dashboard (#1167).
+				path: '/analytics',
+				element: withRouteErrorBoundary(
+					<ProtocolAnalyticsPage />,
+					'Protocol analytics'
+				),
 			},
 			{
 				// Global search results page (#1053).

@@ -40,3 +40,14 @@ export const BATCH_BUY = {
 	MAX_SLIPPAGE_BPS: 500, // 5%
 	MIN_SLIPPAGE_BPS: 0,
 } as const;
+
+/**
+ * Bundle buy constraints (#1118).
+ *
+ * A bundle cart queues several creator keys so they can be submitted as one
+ * atomic `bundle_buy` transaction. The cap mirrors the contract-defined batch
+ * cap so both flows hit the same on-chain limit.
+ */
+export const BUNDLE_BUY = {
+	MAX_BUNDLE_ITEMS: 20,
+} as const;

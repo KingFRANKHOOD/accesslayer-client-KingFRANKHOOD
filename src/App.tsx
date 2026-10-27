@@ -9,6 +9,7 @@ import OfflineBanner from './components/common/OfflineBanner';
 import GlobalPauseBanner from './components/common/GlobalPauseBanner';
 import PendingTransactionBanner from './components/common/PendingTransactionBanner';
 import SessionExpiryWatcher from './components/common/SessionExpiryWatcher';
+import BadgeAchievementListener from './components/common/BadgeAchievementListener';
 import { useContractPausedStore } from './hooks/useContractPausedStore';
 import { routes } from './routes';
 import { useRouteChangeLogging } from './hooks/useRouteChangeLogging';
@@ -56,6 +57,8 @@ function App() {
 				}}
 			/>
 			<SessionExpiryWatcher navigate={path => router.navigate(path)} />
+			{/* Badge achievement celebrations, app-wide (#1222) */}
+			<BadgeAchievementListener navigate={path => router.navigate(path)} />
 			<RouterProvider router={router} />
 		</AppErrorBoundary>
 	);

@@ -40,4 +40,14 @@ if (typeof window !== 'undefined') {
 	} catch {
 		// ignore if already non-configurable
 	}
+
+	if (!globalThis.ResizeObserver) {
+		class MockResizeObserver {
+			observe() {}
+			unobserve() {}
+			disconnect() {}
+		}
+		globalThis.ResizeObserver = MockResizeObserver;
+		window.ResizeObserver = MockResizeObserver;
+	}
 }

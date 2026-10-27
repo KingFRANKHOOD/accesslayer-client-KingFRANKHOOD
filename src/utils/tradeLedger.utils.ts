@@ -2,6 +2,7 @@
  * Helpers for the portfolio trade history table and its CSV export (#1114).
  */
 import type { Trade } from '@/services/tradeHistory.service';
+import { truncateWalletAddress } from '@/utils/referral.utils';
 
 export const TRADE_LEDGER_PAGE_SIZE = 10;
 
@@ -125,4 +126,51 @@ export function tradesToCsv(trades: Trade[]): string {
 
 export function buildTradeCsvFilename(now: number = Date.now()): string {
 	return `accesslayer-trade-history-${new Date(now).toISOString().slice(0, 10)}.csv`;
+}
+
+export const TRADE_HISTORY_CSV_HEADERS = [
+	'Date',
+	'Key Name',
+	'Type',
+	'Quantity',
+	'Price per Key',
+	'Total',
+	'Fee',
+] as const;
+
+/**
+ * Generates formatted CSV content for trade history export (#857).
+ * Columns: Date, Key Name, Type, Quantity, Price per Key, Total, Fee
+ */
+export function generateTradeHistoryCsv(trades: Trade[]): string {
+	const rows = trades.map(trade => {
+		const { fee, total } = computeTradeAmounts(trade);
+		return [
+			new Date(trade.timestamp).toISOString(),
+			trade.keyName,
+			trade.tradeType,
+			String(trade.quantity),
+			String(trade.pricePerKey),
+			String(total),
+			String(fee),
+		].map(escapeCsvField);
+	});
+	return [[...TRADE_HISTORY_CSV_HEADERS], ...rows]
+		.map(row => row.join(','))
+		.join('\r\n');
+}
+
+/**
+ * Builds the export filename for trade history (#857):
+ * trades-[wallet-truncated]-[date].csv
+ */
+export function buildTradeHistoryCsvFilename(
+	wallet: string,
+	now: number | Date | string = Date.now()
+): string {
+	const truncated = truncateWalletAddress(wallet) || wallet;
+	const dateObj =
+		typeof now === 'number' || typeof now === 'string' ? new Date(now) : now;
+	const date = dateObj.toISOString().slice(0, 10);
+	return `trades-${truncated}-${date}.csv`;
 }

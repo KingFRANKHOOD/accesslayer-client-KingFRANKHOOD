@@ -1,6 +1,7 @@
 // src/services/course.service.ts
 import { BaseApiService, ApiError, type APIResponse } from './api.service';
 import type { CreatorSocialLinks } from '@/types/creatorProfile';
+import type { KeySplitEvent } from '@/types/keySplit';
 import type { ContractDynamicFeeRate } from '@/utils/dynamicFeeRate.utils';
 import { cacheManager } from '@/utils/cache.utils';
 
@@ -14,6 +15,8 @@ export interface Course {
 	/** ISO timestamp for the next scheduled drop, when applicable. */
 	nextDropAt?: string;
 	creatorShareSupply?: number;
+	/** Configured max supply cap for this key; null or undefined for uncapped keys. */
+	maxSupply?: number | null;
 	instructorId: string;
 	thumbnail?: string;
 	category: string;
@@ -73,6 +76,12 @@ export interface Course {
 	auctionHighestBid?: number;
 	/** Pre-launch auction bid history, newest first (#924). */
 	auctionBids?: AuctionBidEntry[];
+	/** Final clearing price for settled auction in XLM (#1164). */
+	auctionClearingPrice?: number;
+	/** Number of keys allocated in the auction settlement (#1164). */
+	auctionAllocation?: number;
+	/** Whether the auction has been settled on-chain (#1164). */
+	auctionSettled?: boolean;
 	/**
 	 * Early-sell penalty in basis points (0–2000 = 0%–20%).
 	 * Applied to sells within the first 7 days after key creation.
@@ -125,6 +134,20 @@ export interface Course {
 	 * While true, buying and selling must be disabled in the UI.
 	 */
 	tradingPaused?: boolean;
+	/**
+	 * Whether an admin has frozen trading for this specific key (#1121).
+	 * While true, buying and selling must be disabled in the UI and a
+	 * freeze status banner must be shown with the reason and expiry.
+	 */
+	isFrozen?: boolean;
+	/** Human-readable reason for the freeze, surfaced in the banner. */
+	freezeReason?: string | null;
+	/**
+	 * ISO timestamp when the freeze expires; `null`/absent means the freeze
+	 * is indefinite. The banner auto-dismisses and trading re-enables once
+	 * this moment passes.
+	 */
+	freezeExpiresAt?: string | null;
 	/** Performance bond status for creator key protection (#975). */
 	performanceBond?: PerformanceBond | null;
 	/** Key-level circuit breaker price impact threshold in basis points. */
@@ -139,6 +162,25 @@ export interface Course {
 	whitelist?: WhitelistEntry[];
 	/** Migration details shown when a deprecated key has a successor. */
 	deprecation?: KeyDeprecation | null;
+	/**
+	 * Whether this key has entered its retirement notice period (#1246).
+	 * Distinct from `deprecated`: retirement is a terminal state with a
+	 * guaranteed creator buyback at `retirementBuybackPriceStroops`, with a
+	 * notice window ending at `retirementNoticeExpiresAt`. A key can be
+	 * deprecated without being retired (e.g. superseded but still tradeable
+	 * on the secondary market) or retired without ever having been flagged
+	 * deprecated first.
+	 */
+	isRetiring?: boolean;
+	/** Guaranteed per-key buyback price in stroops during the retirement notice window. */
+	retirementBuybackPriceStroops?: number | null;
+	/**
+	 * ISO timestamp when the retirement notice window closes; null/absent
+	 * means no fixed deadline has been set yet. The exit-notice banner's
+	 * countdown and auto-dismiss both key off this value, the same way
+	 * `freezeExpiresAt` drives the freeze banner above.
+	 */
+	retirementNoticeExpiresAt?: string | null;
 
 	/** Whether purchases are restricted to the early-access whitelist. */
 	earlyAccessEnabled?: boolean;
@@ -146,6 +188,10 @@ export interface Course {
 	earlyAccessWhitelist?: string[];
 	/** ISO timestamp for when public purchases begin. */
 	publicLaunchDate?: string | null;
+	/** Recent key split event executed on this key (#1151). */
+	recentSplit?: KeySplitEvent | null;
+	/** Alias for recentSplit (#1151). */
+	splitExecuted?: KeySplitEvent | null;
 }
 
 export interface KeyDeprecation {
@@ -200,11 +246,55 @@ export interface TradeCooldownInfo {
 }
 
 /**
+ * Wallet-scoped lock-up status for a creator key (#1163).
+ *
+ * Returned by GET /keys/:keyId/lockup/:wallet. While a lock-up is in
+ * effect the holder cannot sell; unlockAt is the absolute timestamp at
+ * which selling becomes possible again.
+ */
+export interface KeyLockupInfo {
+	/** Key this lock-up status belongs to, when the backend echoes it back. */
+	keyId?: string;
+	/** Wallet the lock-up status was resolved for. */
+	wallet?: string;
+	/**
+	 * Absolute unlock timestamp (seconds epoch, milliseconds epoch, or ISO
+	 * string) after which selling is allowed again.
+	 */
+	unlockAt?: number | string | null;
+	/** Whether the backend currently considers the position locked. */
+	isLocked?: boolean;
+	/** Lock-up window length in seconds, when reported explicitly. */
+	lockupDurationSeconds?: number | null;
+}
+
+/**
  * Live trading configuration for a single creator key (#951).
  *
  * Returned by GET /keys/:keyId/config.
  * All prices are in stroops (1 XLM = 10,000,000 stroops).
  */
+/**
+ * Configured price floor for a creator key (#1152).
+ *
+ * Returned by GET /keys/:keyId/price-floor.
+ * Prices can be reported in stroops (1 XLM = 10,000,000 stroops) or XLM.
+ */
+export interface KeyPriceFloor {
+	/** Key this price floor applies to. */
+	keyId?: string;
+	/** Floor price in stroops (primary precision). */
+	floorPriceStroops?: number | null;
+	/** Floor price in XLM (optional alternative representation). */
+	floorPriceXlm?: number | null;
+	/** Generic floor price number if reported as XLM or stroops. */
+	floorPrice?: number | null;
+	/** Whether the price floor is currently enabled/active on this key. */
+	isActive?: boolean;
+	/** Timestamp when the price floor was last updated by an admin. */
+	updatedAt?: string | null;
+}
+
 export interface KeyConfig {
 	/** Key this config belongs to, when the backend echoes it back. */
 	keyId?: string;
@@ -324,7 +414,7 @@ export interface GetCoursesParams {
 	sort?: CourseSortOption;
 }
 
-export type PriceHistoryInterval = '1h' | '24h' | '7d';
+export type PriceHistoryInterval = '1h' | '4h' | '24h' | '7d';
 
 export interface PriceHistoryPoint {
 	timestamp: string;
@@ -402,6 +492,12 @@ export interface KeyStats {
 }
 
 /** Single bid placed during a key's pre-launch auction window (#924). */
+/** Per-swap buy/sell size caps for a key (#1160). `null` means no limit. */
+export interface KeyTradeLimits {
+	maxBuy: number | null;
+	maxSell: number | null;
+}
+
 export interface AuctionBidEntry {
 	/** Unique bid id from the contract. */
 	id: string;
@@ -588,6 +684,22 @@ class CourseService extends BaseApiService {
 			);
 
 			return response.data.data ?? [];
+		} catch (error) {
+			throw this.handleError(error);
+		}
+	}
+
+	/**
+	 * Per-swap trade size limits for a key (#1160).
+	 * GET /keys/:keyId/trade-limits
+	 */
+	async getKeyTradeLimits(keyId: string): Promise<KeyTradeLimits> {
+		try {
+			const response = await this.api.get<APIResponse<KeyTradeLimits>>(
+				`/keys/${keyId}/trade-limits`
+			);
+
+			return response.data.data ?? { maxBuy: null, maxSell: null };
 		} catch (error) {
 			throw this.handleError(error);
 		}
@@ -861,6 +973,45 @@ class CourseService extends BaseApiService {
 			if (error instanceof ApiError && error.status === 404) {
 				// No cooldown concept deployed for this key yet.
 				// Treat as no cooldown data so trade buttons stay enabled.
+				return null;
+			}
+
+			throw this.handleError(error);
+		}
+	}
+
+	// Get wallet lock-up status - GET /keys/:keyId/lockup/:wallet (#1163)
+	async getKeyLockup(
+		keyId: string,
+		wallet: string
+	): Promise<KeyLockupInfo | null> {
+		try {
+			const response = await this.api.get<APIResponse<KeyLockupInfo>>(
+				`/keys/${keyId}/lockup/${wallet}`
+			);
+
+			return response.data.data;
+		} catch (error: unknown) {
+			if (error instanceof ApiError && error.status === 404) {
+				// No lock-up record for this wallet — treat as unlocked so
+				// the sell button stays enabled.
+				return null;
+			}
+
+			throw this.handleError(error);
+		}
+	}
+
+	// Get price floor info - GET /keys/:keyId/price-floor (#1152)
+	async getKeyPriceFloor(keyId: string): Promise<KeyPriceFloor | null> {
+		try {
+			const response = await this.api.get<APIResponse<KeyPriceFloor>>(
+				`/keys/${keyId}/price-floor`
+			);
+
+			return response.data.data;
+		} catch (error: unknown) {
+			if (error instanceof ApiError && error.status === 404) {
 				return null;
 			}
 

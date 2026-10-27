@@ -391,7 +391,9 @@ describe('CreatorDetailPage Integration', () => {
 		expect(
 			await screen.findByTestId('early-access-badge')
 		).toBeInTheDocument();
-		const buyButton = screen.getByTestId('creator-buy-button');
+		const buyButton =
+			screen.queryByTestId('creator-buy-button') ??
+			screen.getByTestId('key-detail-buy-button');
 		expect(buyButton).toBeDisabled();
 		expect(screen.getByRole('tooltip')).toHaveTextContent(
 			'Your wallet is not on the whitelist'
@@ -483,5 +485,98 @@ describe('CreatorDetailPage Integration', () => {
 		expect(
 			await screen.findByText(/only whitelisted wallets can buy/i)
 		).toBeInTheDocument();
+	});
+
+	it('renders mint progress bar and remaining chip when maxSupply is configured', async () => {
+		mockGetCourse.mockResolvedValue({
+			id: 'creator-capped',
+			title: 'Capped Creator',
+			description: 'Has supply cap',
+			price: 0.1,
+			priceStroops: 1_000_000,
+			creatorShareSupply: 150,
+			maxSupply: 300,
+			instructorId: 'capped',
+			category: 'Art',
+			level: 'BEGINNER',
+		});
+
+		render(
+			<QueryClientProvider client={queryClient}>
+				<MemoryRouter initialEntries={['/creators/creator-capped']}>
+					<Routes>
+						<Route path="/creators/:id" element={<CreatorDetailPage />} />
+					</Routes>
+				</MemoryRouter>
+			</QueryClientProvider>
+		);
+
+		expect(await screen.findByRole('progressbar')).toBeInTheDocument();
+		expect(screen.getByTestId('mint-progress-percentage')).toHaveTextContent('50%');
+		expect(screen.getByTestId('remaining-mintable-chip')).toHaveTextContent('150 keys');
+		expect(screen.getByTestId('buy-key-button')).not.toBeDisabled();
+	});
+
+	it('disables buy button at cap and displays MaxSupplyReached message on key detail', async () => {
+		mockGetCourse.mockResolvedValue({
+			id: 'creator-maxed',
+			title: 'Maxed Creator',
+			description: 'Has hit supply cap',
+			price: 0.1,
+			priceStroops: 1_000_000,
+			creatorShareSupply: 250,
+			maxSupply: 250,
+			instructorId: 'maxed',
+			category: 'Art',
+			level: 'BEGINNER',
+		});
+
+		render(
+			<QueryClientProvider client={queryClient}>
+				<MemoryRouter initialEntries={['/creators/creator-maxed']}>
+					<Routes>
+						<Route path="/creators/:id" element={<CreatorDetailPage />} />
+					</Routes>
+				</MemoryRouter>
+			</QueryClientProvider>
+		);
+
+		expect(await screen.findByRole('progressbar')).toBeInTheDocument();
+		expect(screen.getByTestId('mint-progress-percentage')).toHaveTextContent('100%');
+		expect(screen.getByTestId('remaining-mintable-chip')).toHaveTextContent('0 keys');
+		expect(screen.getByTestId('buy-key-button')).toBeDisabled();
+		expect(screen.getByTestId('max-supply-message')).toHaveTextContent(
+			/maximum supply reached/i
+		);
+	});
+
+	it('hides progress bar and remaining chip when key has no maxSupply configured', async () => {
+		mockGetCourse.mockResolvedValue({
+			id: 'creator-uncapped',
+			title: 'Uncapped Creator',
+			description: 'No supply cap',
+			price: 0.1,
+			priceStroops: 1_000_000,
+			creatorShareSupply: 100,
+			maxSupply: null,
+			instructorId: 'uncapped',
+			category: 'Art',
+			level: 'BEGINNER',
+		});
+
+		render(
+			<QueryClientProvider client={queryClient}>
+				<MemoryRouter initialEntries={['/creators/creator-uncapped']}>
+					<Routes>
+						<Route path="/creators/:id" element={<CreatorDetailPage />} />
+					</Routes>
+				</MemoryRouter>
+			</QueryClientProvider>
+		);
+
+		expect(await screen.findByText('Uncapped Creator Profile')).toBeInTheDocument();
+		expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+		expect(screen.queryByTestId('remaining-mintable-chip')).not.toBeInTheDocument();
+		expect(screen.getByTestId('buy-key-button')).not.toBeDisabled();
 	});
 });

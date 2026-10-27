@@ -3,6 +3,7 @@ import { useAccount } from 'wagmi';
 import { courseService, type Course } from '@/services/course.service';
 import { useWalletHoldings } from '@/hooks/useWallet';
 import { AtomicSwapProposalForm } from '@/components/common/AtomicSwapProposalForm';
+import { PendingSwapsList } from '@/components/common/PendingSwapsList';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import showToast from '@/utils/toast.util';
@@ -162,13 +163,6 @@ export default function AtomicSwapCreatePage() {
               </div>
             ) : (
               <div className="space-y-4">
-                <AtomicSwapProposalForm
-                  open={formOpen}
-                  onOpenChange={setFormOpen}
-                  creators={creators}
-                  walletAddress={activeWalletAddress}
-                  isSubmitting={isNetworkMismatch}
-                />
                 <UnavailableAction disabled={paused} reason="Platform is currently paused">
                   <Button
                     onClick={handleOpenForm}
@@ -187,6 +181,16 @@ export default function AtomicSwapCreatePage() {
                 </p>
               </div>
             )}
+          </MarketplaceSection>
+
+          <SectionDivider title="Pending Swaps" spacing="relaxed" />
+          <MarketplaceSection spacing="default" className="marketplace-card-surface rounded-[2rem] border p-6 md:p-8">
+            <SectionHeading
+              title="Pending swap proposals"
+              supportingText="Manage your outgoing and incoming peer-to-peer creator key exchange proposals."
+              className="mb-6"
+            />
+            <PendingSwapsList walletAddress={activeWalletAddress} />
           </MarketplaceSection>
         </main>
       </div>

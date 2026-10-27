@@ -123,6 +123,12 @@ export interface MultiSigAction {
 	description?: string;
 	/** Stable payload shown to admins and signed by their connected wallet. */
 	payload: string;
+	/** Target contract address the action calls, when known. */
+	target?: string;
+	/** Contract function the action invokes. */
+	function?: string;
+	/** Action parameters, when known. */
+	params?: unknown;
 	createdAt: string;
 	requiredSignatures: number;
 	totalSigners: number;
@@ -196,6 +202,9 @@ function toMultiSigAction(raw: unknown): MultiSigAction | null {
 			typeof value.payload === 'string'
 				? value.payload
 				: `admin-action:${id}`,
+		target: typeof value.target === 'string' ? value.target : undefined,
+		function: typeof value.function === 'string' ? value.function : undefined,
+		params: value.params,
 		createdAt:
 			typeof value.createdAt === 'string'
 				? value.createdAt

@@ -5,6 +5,8 @@ import type {
 	CreatorRevenueSummary,
 	CreatorWithdrawalRecord,
 	CreatorWithdrawalResult,
+	RevenueDistributionRecord,
+	RevenueDistributionResult,
 	RevenueTimeRange,
 } from '@/types/creatorRevenue';
 import {
@@ -12,10 +14,14 @@ import {
 	fetchCreatorRevenueSummary,
 	fetchCreatorWithdrawals,
 	submitCreatorWithdrawal,
+	submitRevenueDistribution,
 } from '@/services/creatorRevenue.service';
+import {
+	aggregateRevenueSummary,
+	loadCreatorDistributionHistory,
+} from '@/utils/creatorRevenue.utils';
 import showToast from '@/utils/toast.util';
 import { getSignatureErrorMessage } from '@/utils/errorHandling.utils';
-import { aggregateRevenueSummary } from '@/utils/creatorRevenue.utils';
 
 export const REVENUE_REFETCH_INTERVAL_MS = 60_000; // 60 seconds
 
@@ -99,6 +105,22 @@ export function useCreatorWithdrawalHistory(creatorId: string | undefined) {
 	});
 }
 
+/**
+ * Fetches the list of confirmed distribution records for a creator
+ * (locally persisted until a backend route exists).
+ */
+export function useRevenueDistributionHistory(creatorId: string | undefined) {
+	return useQuery({
+		queryKey: queryKeys.creatorRevenue.distributions(creatorId ?? ''),
+		queryFn: async () => {
+			if (!creatorId) return [];
+			return loadCreatorDistributionHistory(creatorId);
+		},
+		enabled: Boolean(creatorId),
+		staleTime: 15_000,
+	});
+}
+
 export interface UseWithdrawCreatorRevenueMutationOptions {
 	onSuccess?: (result: CreatorWithdrawalResult) => void;
 	onError?: (error: unknown) => void;
@@ -159,6 +181,56 @@ export function useWithdrawCreatorRevenueMutation(
 		onError: (error: unknown) => {
 			showToast.error(getSignatureErrorMessage(error));
 			options.onError?.(error);
+		},
+	});
+}
+
+export interface DistributeRevenueInput {
+	/** Total XLM to distribute pro-rata across key holders. */
+	amount: number;
+	/** Number of key holders that will receive a share. */
+	holderCount: number;
+}
+
+/**
+ * Mutation hook that submits a `distribute_revenue` contract call for a
+ * creator key. On success the distribution history cache is updated with the
+ * confirmed record and the holders + revenue queries are invalidated, with a
+ * RevenueDistributed success toast.
+ */
+export function useDistributeRevenueMutation(
+	creatorId: string,
+	wallet?: string
+) {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationKey: ['contract', 'distribute_revenue', creatorId, wallet ?? ''],
+		mutationFn: (input: DistributeRevenueInput): Promise<RevenueDistributionResult> =>
+			submitRevenueDistribution(
+				creatorId,
+				input.amount,
+				input.holderCount,
+				wallet
+			),
+		onSuccess: (result: RevenueDistributionResult) => {
+			// Optimistically prepend to distribution history in query cache
+			queryClient.setQueryData<RevenueDistributionRecord[]>(
+				queryKeys.creatorRevenue.distributions(creatorId),
+				(old = []) => [result.record, ...old]
+			);
+
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.creators.holders(creatorId),
+			});
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.creatorRevenue.summary(creatorId),
+			});
+
+			showToast.success('Revenue distributed');
+		},
+		onError: (error: unknown) => {
+			showToast.error(getSignatureErrorMessage(error));
 		},
 	});
 }

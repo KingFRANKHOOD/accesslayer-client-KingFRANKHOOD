@@ -30,6 +30,7 @@ const AuctionCountdown: React.FC<AuctionCountdownProps> = ({
 			role="status"
 			aria-live="polite"
 			aria-label={isEnded ? 'Auction closed' : `Auction closes in ${label}`}
+			data-testid="auction-countdown"
 			className={cn(
 				'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold',
 				isEnded

@@ -25,6 +25,11 @@ const {
 vi.mock('@/hooks/useWallet', () => ({
 	useWalletHoldings: (...args: unknown[]) => mockUseWalletHoldings(...args),
 	useTradeHistory: (...args: unknown[]) => mockUseTradeHistory(...args),
+	useWalletBadges: () => ({
+		data: [],
+		isLoading: false,
+		isError: false,
+	}),
 	useClaimStakeMutation: () => ({
 		mutate: vi.fn(),
 		isPending: false,
@@ -34,6 +39,7 @@ vi.mock('@/hooks/useWallet', () => ({
 
 vi.mock('@/hooks/useAllTradeHistory', () => ({
 	useAllTradeHistory: (...args: unknown[]) => mockUseAllTradeHistory(...args),
+	fetchAllTrades: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('@/hooks/useCreatorPrices', () => ({
@@ -272,7 +278,7 @@ describe('ProfilePage — user profile page (#921)', () => {
 		});
 	});
 
-	it('shows the paginated trade history table with CSV export on the trade tab (#1114)', () => {
+	it('shows the paginated trade history table with CSV export on the trade tab (#1114, #857)', () => {
 		seedOwnerView();
 
 		renderProfile('/profile?tab=trade-history');
@@ -281,6 +287,37 @@ describe('ProfilePage — user profile page (#921)', () => {
 		expect(screen.getByTestId('trade-ledger-table')).toBeInTheDocument();
 		expect(screen.getByText('Alpha Key')).toBeInTheDocument();
 		expect(screen.getByTestId('trade-ledger-export')).toBeInTheDocument();
+		expect(
+			screen.getByTestId('export-trade-history-button')
+		).toBeInTheDocument();
+	});
+
+	it('hides the header CSV export button when unauthenticated (#857)', () => {
+		mockUseAccount.mockReturnValue({
+			address: undefined,
+			isConnected: false,
+		});
+		mockUseWalletHoldings.mockReturnValue({
+			data: [],
+			isLoading: false,
+			isError: false,
+		});
+		mockUseCreatorPrices.mockReturnValue({ data: [], isLoading: false });
+		mockUseStakingPositions.mockReturnValue({
+			data: { positions: [] },
+			isLoading: false,
+		});
+		mockUseAllTradeHistory.mockReturnValue({
+			data: [],
+			isLoading: false,
+			isError: false,
+		});
+
+		renderProfile(`/profile/${DEMO_WALLET}?tab=trade-history`);
+
+		expect(
+			screen.queryByTestId('export-trade-history-button')
+		).not.toBeInTheDocument();
 	});
 
 	it('renders staking positions with lock status and claimable rewards on the staking tab', () => {

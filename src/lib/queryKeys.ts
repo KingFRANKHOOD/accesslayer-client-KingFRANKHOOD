@@ -9,6 +9,10 @@
 
 import type { GetCoursesParams } from '@/services/course.service';
 import type { VolumeWindow } from '@/services/leaderboard.service';
+import type {
+	ProtocolTimeRange,
+	LeaderboardMetric,
+} from '@/services/analytics.service';
 
 export const queryKeys = {
 	creatorProfile: {
@@ -29,6 +33,8 @@ export const queryKeys = {
 			['creators', creatorId, 'priceHistory', interval] as const,
 		holders: (creatorId: string) =>
 			['creators', creatorId, 'holders'] as const,
+		holderConcentration: (creatorId: string) =>
+			['creators', creatorId, 'holder-concentration'] as const,
 		holderSnapshots: (creatorId: string, range: string) =>
 			['creators', creatorId, 'holder-snapshots', range] as const,
 		activity: (creatorId: string) =>
@@ -38,16 +44,32 @@ export const queryKeys = {
 		stats: (creatorId: string) => ['creators', creatorId, 'stats'] as const,
 		auctionBids: (creatorId: string) =>
 			['creators', creatorId, 'auction-bids'] as const,
+		tradeLimits: (creatorId: string) =>
+			['creators', creatorId, 'trade-limits'] as const,
+		spotlightAuction: (creatorId: string) =>
+			['creators', creatorId, 'spotlight-auction'] as const,
+		spotlightBids: (creatorId: string) =>
+			['creators', creatorId, 'spotlight-bids'] as const,
+		announcements: (creatorId: string) =>
+			['creators', creatorId, 'announcements'] as const,
+		tips: (creatorId: string) =>
+			['creators', creatorId, 'tips'] as const,
 		uniqueTraders: (creatorId: string) =>
 			['creators', creatorId, 'unique-traders'] as const,
+		reserve: (creatorId: string) =>
+			['creators', creatorId, 'reserve'] as const,
 		curveConfig: (creatorId: string) =>
 			['creators', creatorId, 'curve-config'] as const,
 		curveMigrations: (creatorId: string) =>
 			['creators', creatorId, 'curve-migrations'] as const,
+		curveProposal: (creatorId: string) =>
+			['creators', creatorId, 'curve-proposal'] as const,
 		buyback: (creatorId: string) =>
 			['creators', creatorId, 'buyback'] as const,
 		keyConfig: (creatorId: string) =>
 			['creators', creatorId, 'key-config'] as const,
+		split: (creatorId: string) =>
+			['creators', creatorId, 'split'] as const,
 		vesting: (creatorId: string) =>
 			['creators', creatorId, 'vesting'] as const,
 		vestingClaims: (creatorId: string, wallet: string) =>
@@ -60,14 +82,34 @@ export const queryKeys = {
 			['creators', creatorId, 'snapshot-history', range] as const,
 		reputation: (creatorId: string) =>
 			['creators', creatorId, 'reputation'] as const,
+		priceFloor: (creatorId: string) =>
+			['creators', creatorId, 'price-floor'] as const,
 		// Optional wallet scopes the cache per connected wallet (#915); omit it
 		// to address every wallet's entry for the key (e.g. invalidation).
 		tradeCooldown: (creatorId: string, wallet?: string) =>
 			wallet
 				? (['creators', creatorId, 'trade-cooldown', wallet] as const)
 				: (['creators', creatorId, 'trade-cooldown'] as const),
+		// Wallet-scoped lock-up status (#1163); invalidate without the wallet
+		// to drop every wallet's entry for the key.
+		lockup: (creatorId: string, wallet?: string) =>
+			wallet
+				? (['creators', creatorId, 'lockup', wallet] as const)
+				: (['creators', creatorId, 'lockup'] as const),
 		whitelist: (creatorId: string) =>
 			['creators', creatorId, 'whitelist'] as const,
+		earlyIncentive: (creatorId: string) =>
+			['creators', creatorId, 'early-incentive'] as const,
+		secondaryPrices: (creatorId: string, range: string) =>
+			['creators', creatorId, 'secondary-prices', range] as const,
+		// Order-book depth for the market depth chart (#1220).
+		depth: (creatorId: string, levels: number) =>
+			['creators', creatorId, 'depth', levels] as const,
+		// Content gate configuration for the creator dashboard panel (#1221).
+		gateConfig: (creatorId: string) =>
+			['creators', creatorId, 'gate-config'] as const,
+		paymentSchedule: (creatorId: string) =>
+			['creators', creatorId, 'payment-schedule'] as const,
 		publicProfile: (address: string) =>
 			['creators', 'public-profile', address] as const,
 		keyDeployment: (keyId: string) =>
@@ -76,10 +118,20 @@ export const queryKeys = {
 			all: () => ['creators', 'discovery'] as const,
 			trending: () => ['creators', 'discovery', 'trending'] as const,
 			newListings: () => ['creators', 'discovery', 'newListings'] as const,
+			spotlight: () => ['creators', 'discovery', 'spotlight'] as const,
+			campaigns: (wallet?: string) =>
+				['creators', 'discovery', 'campaigns', wallet ?? ''] as const,
 		},
+	},
+	campaigns: {
+		all: () => ['campaigns'] as const,
+		list: (wallet?: string) => ['campaigns', 'list', wallet ?? ''] as const,
 	},
 	wallet: {
 		holdings: (address: string) => ['wallet', address, 'holdings'] as const,
+		badges: (address: string) => ['wallet', address, 'badges'] as const,
+		badgeMetrics: (address: string) =>
+			['wallet', address, 'badgeMetrics'] as const,
 		portfolioHistory: (address: string, range: string) =>
 			['wallet', address, 'portfolioHistory', range] as const,
 		activity: (address: string) => ['wallet', address, 'activity'] as const,
@@ -93,6 +145,7 @@ export const queryKeys = {
 			['wallet', address, 'stakingPositions'] as const,
 		xlmBalance: (address: string) =>
 			['wallet', address, 'xlmBalance'] as const,
+		feeDiscount: (address: string) => ['wallet', address, 'fee-discount'] as const,
 	},
 	lp: {
 		all: () => ['lp'] as const,
@@ -170,6 +223,10 @@ export const queryKeys = {
 		all: () => ['staking'] as const,
 		dashboard: (wallet: string) => ['staking', wallet, 'dashboard'] as const,
 	},
+	airdropClaims: {
+		all: () => ['airdropClaims'] as const,
+		list: (wallet: string) => ['airdropClaims', wallet, 'list'] as const,
+	},
 	atomicSwap: {
 		all: () => ['atomic-swap'] as const,
 		proposal: (proposalId: string) =>
@@ -193,6 +250,16 @@ export const queryKeys = {
 		all: () => ['status'] as const,
 		platform: () => ['status', 'platform'] as const,
 	},
+	protocolAnalytics: {
+		all: () => ['protocolAnalytics'] as const,
+		data: (range: ProtocolTimeRange = '30d') =>
+			['protocolAnalytics', 'data', range] as const,
+	},
+	keyLeaderboard: {
+		all: () => ['analytics', 'keys', 'leaderboard'] as const,
+		byMetric: (metric: LeaderboardMetric = 'volume') =>
+			['analytics', 'keys', 'leaderboard', metric] as const,
+	},
 	creatorRevenue: {
 		all: () => ['creatorRevenue'] as const,
 		summary: (creatorId: string) =>
@@ -201,6 +268,14 @@ export const queryKeys = {
 			['creatorRevenue', creatorId, 'history', interval] as const,
 		withdrawals: (creatorId: string) =>
 			['creatorRevenue', creatorId, 'withdrawals'] as const,
+		distributions: (creatorId: string) =>
+			['creatorRevenue', creatorId, 'distributions'] as const,
+	},
+	// Holder-facing revenue share claims (#1223).
+	revenueShare: {
+		all: () => ['revenueShare'] as const,
+		distributions: (keyId: string, wallet: string) =>
+			['revenueShare', keyId, 'distributions', wallet] as const,
 	},
 	stakingVault: {
 		/** Active vault stakes for a (wallet, key) pair. */
@@ -220,5 +295,14 @@ export const queryKeys = {
 		history: (limit?: number) =>
 			['auto-invest', 'history', limit ?? 50] as const,
 		settings: () => ['auto-invest', 'settings'] as const,
+	},
+	keySubscription: {
+		all: () => ['keySubscription'] as const,
+		list: (wallet: string) => ['keySubscription', 'list', wallet] as const,
+		detail: (creatorId: string, wallet: string) =>
+			['keySubscription', 'detail', creatorId, wallet] as const,
+	},
+	supportTickets: {
+		mine: () => ['support-tickets', 'mine'] as const,
 	},
 } as const;

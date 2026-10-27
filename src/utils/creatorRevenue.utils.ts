@@ -1,9 +1,12 @@
 import type {
 	CreatorRevenueSummary,
 	CreatorWithdrawalRecord,
+	RevenueDistributionPreviewEntry,
+	RevenueDistributionRecord,
 	RevenueHistoryPoint,
 	RevenueTimeRange,
 } from '@/types/creatorRevenue';
+import type { KeyHolderEntry } from '@/services/course.service';
 
 function toNonNegative(value: unknown): number {
 	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
@@ -255,4 +258,148 @@ export function buildMockWithdrawalTxHash(): string {
 	return Array.from({ length: 64 }, () =>
 		Math.floor(Math.random() * 16).toString(16)
 	).join('');
+}
+
+/** Minimum XLM amount a creator can distribute to key holders. */
+export const MIN_DISTRIBUTION_AMOUNT_XLM = 1;
+
+/** How many top holders are surfaced in the pro-rata preview and confirm modal. */
+export const DISTRIBUTION_TOP_HOLDERS_COUNT = 5;
+
+/**
+ * Filters out holders with no keys and returns the rest sorted by key count
+ * (descending) — the eligible audience for a pro-rata revenue distribution.
+ */
+export function getEligibleDistributionHolders(
+	holders: KeyHolderEntry[] | null | undefined
+): KeyHolderEntry[] {
+	if (!Array.isArray(holders)) return [];
+	return holders
+		.filter(holder => toNonNegative(holder.keyCount) > 0)
+		.sort((a, b) => b.keyCount - a.keyCount);
+}
+
+export function roundToTwoDecimals(value: number): number {
+	return Math.round(value * 100) / 100;
+}
+
+/**
+ * Computes the estimated pro-rata allocation for the top holders given a
+ * total distribution amount. Each holder's share is their key count over the
+ * total keys held by every eligible holder, so the preview matches what the
+ * on-chain `distribute_revenue` call will pay out.
+ */
+export function computeDistributionPreview(
+	holders: KeyHolderEntry[] | null | undefined,
+	amount: number,
+	limit: number = DISTRIBUTION_TOP_HOLDERS_COUNT
+): RevenueDistributionPreviewEntry[] {
+	const eligible = getEligibleDistributionHolders(holders);
+	if (eligible.length === 0 || !Number.isFinite(amount) || amount <= 0) {
+		return [];
+	}
+
+	const totalKeys = eligible.reduce((sum, holder) => sum + holder.keyCount, 0);
+	if (totalKeys <= 0) return [];
+
+	return eligible.slice(0, Math.max(0, limit)).map(holder => {
+		const share = holder.keyCount / totalKeys;
+		return {
+			walletAddress: holder.walletAddress,
+			displayName: holder.displayName,
+			keyCount: holder.keyCount,
+			share,
+			estimatedAmount: roundToTwoDecimals(amount * share),
+		};
+	});
+}
+
+/**
+ * Parses a raw distribution amount input. Returns the numeric value or null
+ * when the input is empty or not a finite number.
+ */
+export function parseDistributionAmount(input: string): number | null {
+	const trimmed = input.trim();
+	if (trimmed === '') return null;
+	const parsed = Number(trimmed);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Validates a raw distribution amount input against the minimum distribution
+ * amount. Returns an inline error message, or null when the input is valid.
+ */
+export function getDistributionAmountError(input: string): string | null {
+	const trimmed = input.trim();
+	if (trimmed === '') return 'Distribution amount is required';
+	const parsed = Number(trimmed);
+	if (!Number.isFinite(parsed)) return 'Enter a valid number';
+	if (parsed < MIN_DISTRIBUTION_AMOUNT_XLM) {
+		return `Minimum distribution is ${MIN_DISTRIBUTION_AMOUNT_XLM} XLM`;
+	}
+	return null;
+}
+
+export function getCreatorDistributionStorageKey(creatorId: string): string {
+	return `accesslayer:creator_distributions:${creatorId}`;
+}
+
+function isValidDistributionRecord(
+	value: unknown
+): value is RevenueDistributionRecord {
+	if (typeof value !== 'object' || value === null) return false;
+	const record = value as Record<string, unknown>;
+	return (
+		typeof record.id === 'string' &&
+		typeof record.creatorId === 'string' &&
+		typeof record.amount === 'number' &&
+		Number.isFinite(record.amount) &&
+		typeof record.timestamp === 'number' &&
+		Number.isFinite(record.timestamp) &&
+		typeof record.holderCount === 'number' &&
+		Number.isFinite(record.holderCount) &&
+		typeof record.status === 'string'
+	);
+}
+
+/**
+ * Loads revenue distribution records for a creator, newest first.
+ */
+export function loadCreatorDistributionHistory(
+	creatorId: string,
+	storage?: MinimalStorage | null
+): RevenueDistributionRecord[] {
+	const store = resolveStorage(storage);
+	if (!creatorId || !store) return [];
+	try {
+		const raw = store.getItem(getCreatorDistributionStorageKey(creatorId));
+		if (!raw) return [];
+		const parsed: unknown = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return [];
+		return parsed
+			.filter(isValidDistributionRecord)
+			.sort((a, b) => b.timestamp - a.timestamp);
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Persists revenue distribution records for a creator.
+ */
+export function saveCreatorDistributionHistory(
+	creatorId: string,
+	records: RevenueDistributionRecord[],
+	storage?: MinimalStorage | null
+): void {
+	const store = resolveStorage(storage);
+	if (!creatorId || !store) return;
+	try {
+		store.setItem(
+			getCreatorDistributionStorageKey(creatorId),
+			JSON.stringify(records)
+		);
+	} catch {
+		// ignore persistence failure
+	}
 }

@@ -21,6 +21,7 @@ export interface AuctionPhaseConfig {
 	auctionSupply?: number | null;
 	auctionSold?: number | null;
 	auctionEndsAt?: string | null;
+	auctionSettled?: boolean | null;
 }
 
 function isFiniteNumber(value: number | null | undefined): value is number {
@@ -48,8 +49,13 @@ export function getAuctionPhaseStatus(
 	const hasAuction =
 		(config.auctionPrice ?? 0) > 0 ||
 		(config.auctionSupply ?? 0) > 0 ||
-		toMs(config.auctionEndsAt) != null;
+		toMs(config.auctionEndsAt) != null ||
+		config.auctionSettled === true;
 	if (!hasAuction) return 'inactive';
+
+	if (config.auctionSettled === true) {
+		return 'ended';
+	}
 
 	const endMs = toMs(config.auctionEndsAt);
 	if (
@@ -104,13 +110,11 @@ export function resolveAuctionMinIncrement(
  * bid this is the fixed early-access price (or the increment when that too
  * is absent); once a bid exists it is `highest + increment`.
  */
-export function computeMinimumNextBid(
-	config: {
-		highestBid?: number | null;
-		minIncrement?: number | null;
-		startingPrice?: number | null;
-	}
-): number {
+export function computeMinimumNextBid(config: {
+	highestBid?: number | null;
+	minIncrement?: number | null;
+	startingPrice?: number | null;
+}): number {
 	const { highestBid, minIncrement, startingPrice } = config;
 	const increment = resolveAuctionMinIncrement(minIncrement);
 
@@ -125,6 +129,8 @@ export function computeMinimumNextBid(
 
 export interface AuctionBidValidation {
 	isValid: boolean;
+	/** Error classification code (#1164). */
+	errorCode?: 'BelowMinimum' | 'InvalidAmount' | 'Required' | null;
 	/** Human-readable error shown under the bid input when invalid. */
 	error: string | null;
 	/** Parsed numeric bid value when valid, otherwise null. */
@@ -149,24 +155,35 @@ export function validateAuctionBid(
 ): AuctionBidValidation {
 	const trimmed = raw.trim();
 	if (trimmed === '') {
-		return { isValid: false, error: 'Enter a bid amount', value: null };
+		return {
+			isValid: false,
+			errorCode: 'Required',
+			error: 'Enter a bid amount',
+			value: null,
+		};
 	}
 
 	const value = Number(trimmed);
 	if (!Number.isFinite(value) || value <= 0) {
-		return { isValid: false, error: 'Enter a bid greater than 0', value: null };
+		return {
+			isValid: false,
+			errorCode: 'InvalidAmount',
+			error: 'Enter a bid greater than 0',
+			value: null,
+		};
 	}
 
 	const minimum = computeMinimumNextBid(ctx);
 	if (value < minimum) {
 		return {
 			isValid: false,
-			error: `Minimum bid is ${formatAuctionBidAmount(minimum)}`,
+			errorCode: 'BelowMinimum',
+			error: `BelowMinimum: Minimum bid is ${formatAuctionBidAmount(minimum)}`,
 			value: null,
 		};
 	}
 
-	return { isValid: true, error: null, value };
+	return { isValid: true, errorCode: null, error: null, value };
 }
 
 /**
@@ -197,11 +214,17 @@ export function resolveHighestBid(
 ): number | null {
 	let highest: number | null = null;
 	for (const bid of bids ?? []) {
-		if (isFiniteNumber(bid.amount) && (highest == null || bid.amount > highest)) {
+		if (
+			isFiniteNumber(bid.amount) &&
+			(highest == null || bid.amount > highest)
+		) {
 			highest = bid.amount;
 		}
 	}
-	return highest ?? (isFiniteNumber(explicitHighestBid) ? explicitHighestBid : null);
+	return (
+		highest ??
+		(isFiniteNumber(explicitHighestBid) ? explicitHighestBid : null)
+	);
 }
 
 /**

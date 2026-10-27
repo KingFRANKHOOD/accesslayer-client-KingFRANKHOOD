@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { useMemo, useState, useEffect } from 'react';
+import { Link, useLocation, useParams, useSearchParams } from 'react-router';
 import { useAccount } from 'wagmi';
 import {
 	BarChart2,
@@ -18,11 +18,13 @@ import HeldKeysGrid from '@/components/common/HeldKeysGrid';
 import StakingPositionsList from '@/components/common/StakingPositionsList';
 import LiquidityPositionsSection from '@/components/common/LiquidityPositionsSection';
 import TradeHistoryLedger from '@/components/common/TradeHistoryLedger';
+import ExportTradeHistoryCsvButton from '@/components/common/ExportTradeHistoryCsvButton';
 import AtomicSwapHistory from '@/components/common/AtomicSwapHistory';
 import ProtocolRevenueClaim from '@/components/common/ProtocolRevenueClaim';
 import ProtocolRevenueDistributionTable from '@/components/common/ProtocolRevenueDistributionTable';
 import WalletActivityFeed from '@/components/common/WalletActivityFeed';
 import SectionErrorBoundary from '@/components/common/SectionErrorBoundary';
+import WalletBadgeShowcase from '@/components/common/WalletBadgeShowcase';
 import TruncatedAddress from '@/components/common/TruncatedAddress';
 import { ProfileTabPillGroup } from '@/components/common/ProfileTabPill';
 import ActivePriceAlertsList from '@/components/common/ActivePriceAlertsList';
@@ -104,6 +106,7 @@ function resolveCurrentPriceStroops(priceFields?: {
 export default function ProfilePage() {
 	const { wallet: publicWallet } = useParams<{ wallet: string }>();
 	const { address: connectedAddress } = useAccount();
+	const location = useLocation();
 	const profile = useProfileStore(state => state.profile);
 	const [searchParams, setSearchParams] = useSearchParams();
 	const requestedTab = searchParams.get('tab');
@@ -126,6 +129,23 @@ export default function ProfilePage() {
 	const isOwnProfile = !publicWallet
 		? true
 		: isOwnWallet(connectedAddress ?? null, publicWallet);
+
+	// Deep link from the badge achievement toast (#1222): scroll the badge
+	// showcase into view once the page is on screen. Keyed on the location so
+	// the CTA still re-scrolls when the profile page is already open.
+	const badgeShowcaseRequested = location.hash === '#wallet-badges';
+	useEffect(() => {
+		if (!badgeShowcaseRequested) return;
+		const target = document.getElementById('wallet-badges');
+		const maybeTarget = target as
+			| (HTMLElement & {
+					scrollIntoView?: (options?: ScrollIntoViewOptions) => void;
+			  })
+			| null;
+		if (maybeTarget && typeof maybeTarget.scrollIntoView === 'function') {
+			maybeTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		}
+	}, [badgeShowcaseRequested, location.key]);
 
 	useDocumentTitle(
 		isOwnProfile ? 'My Portfolio — AccessLayer' : 'Portfolio — AccessLayer'
@@ -293,6 +313,10 @@ export default function ProfilePage() {
 					onShareProfile={handleShareProfile}
 					isShareCopied={isShareCopied}
 				/>
+
+				<SectionErrorBoundary sectionName="badges">
+					<WalletBadgeShowcase wallet={profileWallet} />
+				</SectionErrorBoundary>
 
 				{/* Tab navigation */}
 				<ProfileTabPillGroup
@@ -568,13 +592,19 @@ export default function ProfilePage() {
 						data-testid="portfolio-trade-history-panel"
 					>
 						<div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 md:p-8">
-							<div className="mb-6">
-								<h2 className="font-grotesque text-2xl font-bold text-white">
-									Trade History
-								</h2>
-								<p className="mt-1 text-sm text-white/65">
-									A full audit trail of past buys and sells
-								</p>
+							<div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+								<div>
+									<h2 className="font-grotesque text-2xl font-bold text-white">
+										Trade History
+									</h2>
+									<p className="mt-1 text-sm text-white/65">
+										A full audit trail of past buys and sells
+									</p>
+								</div>
+								<ExportTradeHistoryCsvButton
+									walletAddress={profileWallet}
+									isOwnProfile={isOwnProfile}
+								/>
 							</div>{' '}
 							<SectionErrorBoundary sectionName="trade history">
 								<TradeHistoryLedger walletAddress={profileWallet} />
@@ -610,17 +640,19 @@ export default function ProfilePage() {
 
 				{/* Price alerts panel (#1057) */}
 				{activeTab === 'price-alerts' && (
-				        <section
-				                id="profile-panel-price-alerts"
-				                role="tabpanel"
-				                aria-labelledby="profile-tab-price-alerts"
-				                data-testid="portfolio-price-alerts-panel"
-				        >
-				                <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 md:p-8">
-				                        <h2 className="font-grotesque text-2xl font-bold text-white mb-6">Price Alerts</h2>
-				                        <ActivePriceAlertsList userId={profileWallet} />
-				                </div>
-				        </section>
+					<section
+						id="profile-panel-price-alerts"
+						role="tabpanel"
+						aria-labelledby="profile-tab-price-alerts"
+						data-testid="portfolio-price-alerts-panel"
+					>
+						<div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 md:p-8">
+							<h2 className="font-grotesque text-2xl font-bold text-white mb-6">
+								Price Alerts
+							</h2>
+							<ActivePriceAlertsList userId={profileWallet} />
+						</div>
+					</section>
 				)}
 
 				{/* Activity feed panel */}

@@ -144,6 +144,46 @@ export function useCreatorWhitelist(
 		},
 	});
 
+	const setModeMutation = useMutation({
+		mutationFn: (enabled: boolean) =>
+			creatorWhitelistService.set_whitelist_mode(keyId!, enabled),
+		onSuccess: updated => {
+			queryClient.setQueryData(
+				queryKeys.creators.whitelist(keyId ?? ''),
+				updated
+			);
+			queryClient.setQueryData(
+				queryKeys.creators.detail(keyId ?? ''),
+				(old: Course | undefined) =>
+					old
+						? {
+								...old,
+								isWhitelistEnabled: updated.isWhitelistEnabled,
+								whitelistEnabled: updated.isWhitelistEnabled,
+							}
+						: old
+			);
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.creators.whitelist(keyId ?? ''),
+			});
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.creators.detail(keyId ?? ''),
+			});
+			showToast.success(
+				updated.isWhitelistEnabled
+					? 'Early access whitelist enabled'
+					: 'Early access whitelist disabled'
+			);
+		},
+		onError: (error: unknown) => {
+			const message =
+				error instanceof Error
+					? error.message
+					: 'Failed to update whitelist mode';
+			showToast.error(message);
+		},
+	});
+
 	// Derive values with fallback to initialCourse props
 	const entries: WhitelistEntry[] =
 		query.data?.entries ?? initialCourse?.whitelist ?? [];
@@ -161,8 +201,9 @@ export function useCreatorWhitelist(
 		addAddresses: addMutation.mutateAsync,
 		removeAddress: removeMutation.mutateAsync,
 		disableWhitelist: disableMutation.mutateAsync,
+		setWhitelistMode: setModeMutation.mutateAsync,
 		isAdding: addMutation.isPending,
 		isRemoving: removeMutation.isPending,
-		isDisabling: disableMutation.isPending,
+		isDisabling: disableMutation.isPending || setModeMutation.isPending,
 	};
 }

@@ -3,12 +3,27 @@ import { useEffect, useState } from 'react';
 export interface ProtocolStatus {
 	globalTradingPaused: boolean;
 	pauseActivatedAt?: string;
+	/** Admin-supplied reason shown in the emergency pause banner (#1157). */
+	pauseReason?: string | null;
+	/** ISO timestamp for the expected resume; null/absent means until further notice (#1157). */
+	resumeAt?: string | null;
+}
+
+export interface GlobalPauseState {
+	paused: boolean;
+	pauseActivatedAt?: string;
+	pauseReason: string | null;
+	resumeAt: string | null;
 }
 
 const POLL_INTERVAL_MS = 30_000;
 
-let globalPaused = false;
-let globalPauseActivatedAt: string | undefined;
+let globalState: GlobalPauseState = {
+	paused: false,
+	pauseActivatedAt: undefined,
+	pauseReason: null,
+	resumeAt: null,
+};
 let listeners: Array<() => void> = [];
 
 const notify = () => listeners.forEach(l => l());
@@ -18,12 +33,19 @@ const check = async () => {
 		const res = await fetch('/protocol/status');
 		if (!res.ok) return;
 		const data: ProtocolStatus = await res.json();
-		if (
-			globalPaused !== data.globalTradingPaused ||
-			globalPauseActivatedAt !== data.pauseActivatedAt
-		) {
-			globalPaused = data.globalTradingPaused;
-			globalPauseActivatedAt = data.pauseActivatedAt;
+		const next: GlobalPauseState = {
+			paused: data.globalTradingPaused,
+			pauseActivatedAt: data.pauseActivatedAt,
+			pauseReason: data.pauseReason ?? null,
+			resumeAt: data.resumeAt ?? null,
+		};
+		const changed =
+			globalState.paused !== next.paused ||
+			globalState.pauseActivatedAt !== next.pauseActivatedAt ||
+			globalState.pauseReason !== next.pauseReason ||
+			globalState.resumeAt !== next.resumeAt;
+		if (changed) {
+			globalState = next;
 			notify();
 		}
 	} catch {
@@ -33,18 +55,11 @@ const check = async () => {
 
 let pollTimer: number | undefined;
 
-export function useGlobalPause() {
-	const [state, setState] = useState({
-		paused: globalPaused,
-		pauseActivatedAt: globalPauseActivatedAt,
-	});
+export function useGlobalPause(): GlobalPauseState {
+	const [state, setState] = useState<GlobalPauseState>(globalState);
 
 	useEffect(() => {
-		const listener = () =>
-			setState({
-				paused: globalPaused,
-				pauseActivatedAt: globalPauseActivatedAt,
-			});
+		const listener = () => setState(globalState);
 		listeners.push(listener);
 
 		if (listeners.length === 1) {

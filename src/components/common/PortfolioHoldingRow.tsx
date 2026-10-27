@@ -3,6 +3,9 @@ import { Button } from '@/components/ui/button';
 import LockupCountdown from '@/components/common/LockupCountdown';
 import ReinvestDividendDialog from '@/components/common/ReinvestDividendDialog';
 import DeprecationNotice from '@/components/common/DeprecationNotice';
+import ExitNoticeBanner from '@/components/common/ExitNoticeBanner';
+import ReportIssueButton from '@/components/common/ReportIssueButton';
+import SocialShareButton from '@/components/common/SocialShareButton';
 import RedeemKeyDialog from '@/components/common/RedeemKeyDialog';
 import BatchTransferModal from '@/components/common/BatchTransferModal';
 import { computeRemainingLockupSeconds } from '@/utils/lockupCountdown.utils';
@@ -24,6 +27,13 @@ import {
 	xlmToStroops,
 } from '@/utils/reinvestDividend.utils';
 import { isKeyDeprecated } from '@/utils/keyDeprecation.utils';
+import {
+	useKeyLockup,
+	useRemainingUnlockSeconds,
+	isKeyLockupActive,
+} from '@/hooks/useKeyLockup';
+import KeyLockupBadge from '@/components/common/KeyLockupBadge';
+import { formatUnlockCountdown } from '@/utils/lockupCountdown.utils';
 import type { BatchTransferRecipient } from '@/utils/batchTransfer.utils';
 
 import {
@@ -43,6 +53,7 @@ import type { Course } from '@/services/course.service';
 import { cn } from '@/lib/utils';
 import { useGlobalPause } from '@/hooks/useGlobalPause';
 import { UnavailableAction } from '@/components/ui/unavailable-action';
+import { useAccount } from 'wagmi';
 
 export interface PortfolioHoldingRowProps {
 	position: HeldKeyPosition;
@@ -100,6 +111,17 @@ export const PortfolioHoldingRow: React.FC<PortfolioHoldingRowProps> = ({
 	const deprecated = isKeyDeprecated(creator);
 	const { paused } = useGlobalPause();
 
+	// #1163 — server-side lock-up status for this wallet and key. While a
+	// lock-up is in effect the Sell button stays disabled and the badge
+	// shows the unlock countdown; both drop automatically at expiry.
+	const { address: connectedWalletAddress } = useAccount();
+	const { data: keyLockup } = useKeyLockup(
+		position.creatorId,
+		connectedWalletAddress
+	);
+	const lockupRemainingSeconds = useRemainingUnlockSeconds(keyLockup?.unlockAt);
+	const isPositionLocked = isKeyLockupActive(keyLockup, lockupRemainingSeconds);
+
 	// #935 — unrealised P&L for this position: what the keys would fetch if sold
 	// at the current bonding-curve sell price, less what was paid for them.
 	const positionPnL = calculatePositionPnL(position);
@@ -143,6 +165,14 @@ export const PortfolioHoldingRow: React.FC<PortfolioHoldingRowProps> = ({
 
 	return (
 		<>
+			{creator?.isRetiring && (
+				<ExitNoticeBanner
+					creator={creator}
+					holdingsCount={liquidQuantity}
+					onSellNow={() => onSell?.(position.creatorId)}
+					className="mb-3"
+				/>
+			)}
 			<div
 				className={cn(
 					'flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition-opacity sm:flex-row sm:items-center sm:justify-between',
@@ -171,6 +201,32 @@ export const PortfolioHoldingRow: React.FC<PortfolioHoldingRowProps> = ({
 							</span>
 						)}
 					</button>
+					{creator && (
+						<SocialShareButton
+							share={{
+								context: 'key',
+								keyName: creator.title || 'this key',
+								priceXlm: formatDisplayKeyPrice(
+									resolveCreatorKeyPriceStroops(position)
+								),
+								change24h: creator.change24h,
+								url:
+									typeof window !== 'undefined'
+										? `${window.location.origin}/creator/${position.creatorId}`
+										: `/creator/${position.creatorId}`,
+							}}
+							title={`Share ${creator.title || 'this key'}`}
+							className="ml-1 h-auto px-1.5 py-0.5"
+							data-testid="portfolio-row-share-button"
+						/>
+					)}
+					{creator && (
+						<ReportIssueButton
+							keyId={position.creatorId}
+							keyName={creator.title}
+							className="ml-1 h-auto px-1.5 py-0.5"
+						/>
+					)}
 					<div className="mt-1 text-xs text-white/55">
 						{formatNumber(position.quantity)} keys ·{' '}
 						{position.isPriceLoading
@@ -245,6 +301,9 @@ export const PortfolioHoldingRow: React.FC<PortfolioHoldingRowProps> = ({
 							onExpire={() => setIsLocked(false)}
 						/>
 					)}
+					{!deprecated && (
+						<KeyLockupBadge unlockAt={keyLockup?.unlockAt} />
+					)}
 
 					<div className="flex items-center gap-2">
 						{deprecated ? (
@@ -299,8 +358,12 @@ export const PortfolioHoldingRow: React.FC<PortfolioHoldingRowProps> = ({
 								)}
 								{onSell && (
 									<UnavailableAction
-										disabled={paused}
-										reason="Trading is currently paused"
+										disabled={paused || isPositionLocked}
+										reason={
+											paused
+												? 'Trading is currently paused'
+												: `LockupActive: Selling is disabled while this position is under lock-up. Unlocks in ${formatUnlockCountdown(lockupRemainingSeconds)}.`
+										}
 									>
 										<Button
 											size="sm"
@@ -309,6 +372,7 @@ export const PortfolioHoldingRow: React.FC<PortfolioHoldingRowProps> = ({
 											onClick={() => onSell(position.creatorId)}
 											disabled={
 												isLocked ||
+												isPositionLocked ||
 												isLiquidEmpty ||
 												isNetworkMismatch ||
 												isSubmitting ||

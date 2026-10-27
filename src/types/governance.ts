@@ -8,7 +8,13 @@
 
 /** Current status of a governance proposal. */
 export type ProposalStatus =
-	'active' | 'closed' | 'passed' | 'rejected' | 'executed' | 'cancelled';
+	| 'active'
+	| 'closed'
+	| 'passed'
+	| 'rejected'
+	| 'failed'
+	| 'executed'
+	| 'cancelled';
 
 export type ProposalOutcome = 'passed' | 'failed' | 'quorum_not_met';
 
@@ -75,6 +81,12 @@ export interface Proposal {
 	againstVotes: number;
 	/** Aggregate abstain weight. */
 	abstainVotes: number;
+	/** Optional protocol parameter name targeted by this proposal (#1126). */
+	paramName?: string;
+	/** Previous protocol parameter value before execution (#1126). */
+	oldValue?: string | number;
+	/** Proposed or executed new protocol parameter value (#1126). */
+	newValue?: string | number;
 }
 
 /** Props accepted by the QuorumIndicator component. */

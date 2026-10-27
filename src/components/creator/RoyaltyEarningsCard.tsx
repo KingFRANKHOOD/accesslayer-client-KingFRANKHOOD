@@ -66,6 +66,25 @@ export default function RoyaltyEarningsCard({ keyId }: { keyId: string }) {
 				<Stat label="Claimed" value={earnings.claimedXlm} />
 			</dl>
 
+			{/* Royalty rate with edit link (#1177) */}
+			<div className="mt-4 flex items-center gap-2 text-sm text-white/60">
+				<span>
+					Royalty rate{' '}
+					<span className="font-semibold text-white/90" data-testid="royalty-rate">
+						{earnings.royaltyRateBps != null
+							? `${(earnings.royaltyRateBps / 100).toFixed(2)}%`
+							: '—'}
+					</span>
+				</span>
+				<a
+					href="#edit-royalty-rate"
+					className="text-amber-300/80 underline underline-offset-2 hover:text-amber-200"
+					data-testid="royalty-rate-edit"
+				>
+					Edit
+				</a>
+			</div>
+
 			<div className="mt-6 flex items-center gap-3">
 				<button
 					type="button"

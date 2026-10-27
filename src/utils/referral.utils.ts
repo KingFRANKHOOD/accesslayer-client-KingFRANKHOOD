@@ -193,3 +193,108 @@ export function buildReferralTerms(rewardBps: number): string[] {
 		'Wallets that join but never trade do not earn a reward, but they still count towards your referral total.',
 	];
 }
+
+// ---------------------------------------------------------------------------
+// Tier breakdown + earnings ledger (#1119)
+// ---------------------------------------------------------------------------
+
+/** Referral-network depths surfaced on the dashboard. */
+export const REFERRAL_TIERS = [1, 2, 3] as const;
+
+export type ReferralTier = (typeof REFERRAL_TIERS)[number];
+
+/** Number of referred wallets per tier. */
+export type ReferralTierCounts = Record<ReferralTier, number>;
+
+/**
+ * Normalises a wallet's referral depth onto a supported tier. Missing,
+ * invalid, or out-of-range values fall back to Tier 1 — a referrer's direct
+ * introductions are the default depth.
+ */
+export function resolveReferralTier(
+	wallet: ReferredWallet | null | undefined
+): ReferralTier {
+	const tier = wallet?.tier;
+	if (tier == null || !Number.isFinite(tier)) return 1;
+	const rounded = Math.round(tier) as ReferralTier;
+	if (REFERRAL_TIERS.includes(rounded)) return rounded;
+	return 1;
+}
+
+/** Counts referred wallets per tier (Tier 1 / 2 / 3). */
+export function countReferralTiers(
+	wallets: Array<ReferredWallet | null | undefined>
+): ReferralTierCounts {
+	const counts: ReferralTierCounts = { 1: 0, 2: 0, 3: 0 };
+	for (const wallet of wallets) {
+		if (!wallet) continue;
+		counts[resolveReferralTier(wallet)] += 1;
+	}
+	return counts;
+}
+
+/**
+ * Shortens a wallet address for dense table cells: first four and last four
+ * characters joined by an ellipsis. Short addresses are returned unchanged.
+ */
+export function truncateWalletAddress(
+	address: string | null | undefined
+): string {
+	const trimmed = address?.trim() ?? '';
+	if (!trimmed) return '';
+	if (trimmed.length <= 10) return trimmed;
+	return `${trimmed.slice(0, 4)}…${trimmed.slice(-4)}`;
+}
+
+/** One row of the referral earnings ledger. */
+export interface ReferralEarningRow {
+	/** Stable key for list rendering. */
+	id: string;
+	/** ISO timestamp the earning was credited (first trade, else join date). */
+	date: string;
+	/** Source wallet address, as returned by the API. */
+	sourceWallet: string;
+	/** Referral-network depth the earning was credited at. */
+	tier: ReferralTier;
+	/** Fee earned from this wallet's first trade, in XLM. */
+	amountXlm: number;
+	/** Whether this earning has already been claimed. */
+	claimed: boolean;
+}
+
+/**
+ * Builds the earnings ledger (date, source wallet, tier, amount) from the
+ * referred-wallet list, sorted by date descending.
+ *
+ * Only wallets that actually earned a reward (a positive `rewardXlm`) appear
+ * as earnings — referred wallets that have not traded yet have no earning.
+ */
+export function buildReferralEarningsRows(
+	wallets: Array<ReferredWallet | null | undefined>
+): ReferralEarningRow[] {
+	return wallets
+		.filter((wallet): wallet is ReferredWallet => Boolean(wallet))
+		.map((wallet, index) => ({
+			id: `${wallet.address}-${index}`,
+			date: wallet.firstTradeAt || wallet.joinedAt,
+			sourceWallet: wallet.address,
+			tier: resolveReferralTier(wallet),
+			amountXlm: toNonNegative(wallet.rewardXlm),
+			claimed: Boolean(wallet.rewardClaimed),
+		}))
+		.filter(row => row.amountXlm > 0)
+		.sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
+}
+
+/**
+ * Builds the pre-filled Telegram share URL for a referral link.
+ *
+ * See https://core.telegram.org/bots/features#inline-keyboards — `t.me/share`
+ * accepts `url` (the link to share) and `text` (the accompanying caption).
+ */
+export function buildTelegramShareUrl(
+	link: string,
+	text: string = buildReferralShareText(link)
+): string {
+	return `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
+}

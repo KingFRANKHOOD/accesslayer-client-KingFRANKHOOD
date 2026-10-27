@@ -1,8 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-const { mockGet, mockPost } = vi.hoisted(() => ({
+const { mockGet, mockPost, mockSubmitCreatorContractCall } = vi.hoisted(() => ({
 	mockGet: vi.fn(),
 	mockPost: vi.fn(),
+	mockSubmitCreatorContractCall: vi.fn(),
 }));
 
 vi.mock('axios', () => ({
@@ -26,13 +27,22 @@ vi.mock('axios', () => ({
 		(err as Record<string, unknown>).isAxiosError === true,
 }));
 
+vi.mock('@/hooks/useCreatorContractActions', () => ({
+	submitCreatorContractCall: mockSubmitCreatorContractCall,
+}));
+
 import { cacheManager } from '@/utils/cache.utils';
+import {
+	loadCreatorDistributionHistory,
+	getCreatorDistributionStorageKey,
+} from '@/utils/creatorRevenue.utils';
 import {
 	creatorRevenueService,
 	fetchCreatorRevenueSummary,
 	fetchCreatorRevenueHistory,
 	fetchCreatorWithdrawals,
 	submitCreatorWithdrawal,
+	submitRevenueDistribution,
 } from '../creatorRevenue.service';
 
 const CREATOR_ID = 'creator-alice';
@@ -47,6 +57,11 @@ describe('creatorRevenueService', () => {
 	beforeEach(() => {
 		mockGet.mockReset();
 		mockPost.mockReset();
+		mockSubmitCreatorContractCall.mockReset();
+		mockSubmitCreatorContractCall.mockResolvedValue({ success: true });
+		window.localStorage.removeItem(
+			getCreatorDistributionStorageKey(CREATOR_ID)
+		);
 		cacheManager.invalidateAll();
 	});
 
@@ -172,5 +187,46 @@ describe('creatorRevenueService', () => {
 		mockPost.mockResolvedValueOnce(fakeApiResponse({}));
 		const claim = await submitCreatorWithdrawal(CREATOR_ID, 10);
 		expect(claim.success).toBe(true);
+	});
+
+	it('submits a distribute_revenue contract call and persists the confirmed record', async () => {
+		const result = await creatorRevenueService.distributeRevenue(
+			CREATOR_ID,
+			120,
+			6,
+			'GWALLET01'
+		);
+
+		expect(mockSubmitCreatorContractCall).toHaveBeenCalledWith(
+			'distribute_revenue',
+			{
+				creatorId: CREATOR_ID,
+				amount: 120,
+				holderCount: 6,
+				wallet: 'GWALLET01',
+			}
+		);
+		expect(result.success).toBe(true);
+		expect(result.record.creatorId).toBe(CREATOR_ID);
+		expect(result.record.amount).toBe(120);
+		expect(result.record.holderCount).toBe(6);
+		expect(result.record.status).toBe('confirmed');
+
+		const stored = loadCreatorDistributionHistory(CREATOR_ID);
+		expect(stored).toHaveLength(1);
+		expect(stored[0].id).toBe(result.record.id);
+	});
+
+	it('supports the submitRevenueDistribution convenience wrapper', async () => {
+		const result = await submitRevenueDistribution(CREATOR_ID, 50, 3);
+		expect(result.success).toBe(true);
+		expect(mockSubmitCreatorContractCall).toHaveBeenCalledWith(
+			'distribute_revenue',
+			expect.objectContaining({
+				creatorId: CREATOR_ID,
+				amount: 50,
+				holderCount: 3,
+			})
+		);
 	});
 });

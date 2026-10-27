@@ -429,6 +429,38 @@
 }
 
 /*
+ * Badge achievement reveal animation (#1222).
+ *
+ * The achievement toast plays this on the badge icon so the mint reads as a
+ * celebration rather than a static notification. With reduced motion the
+ * animation is suppressed and the icon is simply shown.
+ */
+@keyframes badge-reveal {
+	0% {
+		opacity: 0;
+		transform: scale(0.4) rotate(-12deg);
+	}
+	60% {
+		opacity: 1;
+		transform: scale(1.15) rotate(6deg);
+	}
+	100% {
+		opacity: 1;
+		transform: scale(1) rotate(0deg);
+	}
+}
+
+.badge-reveal {
+	animation: badge-reveal 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.badge-reveal {
+		animation: none;
+	}
+}
+
+/*
  * High-contrast / forced-colors overlay text guardrails (#313).
  *
  * The image-overlay pills on the creator card render text over a

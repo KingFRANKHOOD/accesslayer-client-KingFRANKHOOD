@@ -1,8 +1,10 @@
-import { Settings } from 'lucide-react';
+import { BellRing, Settings } from 'lucide-react';
+import { Link } from 'react-router';
 import { useProfileStore } from '@/hooks/useProfileStore';
 import { useSessions } from '@/hooks/useSessions';
 import { useNavigationTiming } from '@/hooks/useNavigationTiming';
 import SessionSecuritySection from '@/components/settings/SessionSecuritySection';
+import MyTicketsSection from '@/components/settings/MyTicketsSection';
 
 /**
  * Account settings page (#1111).
@@ -34,6 +36,21 @@ export default function AccountSettingsPage() {
 				</h1>
 			</div>
 
+			<Link
+				to="/settings/notifications"
+				className="mb-6 flex items-center gap-3 rounded-xl border border-border p-4 transition-colors hover:bg-accent/40"
+			>
+				<BellRing className="size-5 text-foreground" aria-hidden="true" />
+				<span>
+					<span className="block text-sm font-medium text-foreground">
+						Notification preferences
+					</span>
+					<span className="mt-0.5 block text-xs text-muted-foreground">
+						Manage your on-chain alert settings
+					</span>
+				</span>
+			</Link>
+
 			<SessionSecuritySection
 				sessions={sessions}
 				isLoading={isLoading}
@@ -41,7 +58,10 @@ export default function AccountSettingsPage() {
 				isRevoking={isRevoking}
 				onRevokeSession={revokeSession}
 				onRevokeAllOtherSessions={revokeAllOtherSessions}
+				className="mb-6"
 			/>
+
+			<MyTicketsSection />
 		</main>
 	);
 }

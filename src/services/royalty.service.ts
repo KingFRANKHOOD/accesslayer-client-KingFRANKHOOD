@@ -31,6 +31,8 @@ export interface RoyaltyEarningsSummary {
   transfers: RoyaltyTransferEvent[];
   /** Completed claims with transaction hashes, newest first. */
   claims: RoyaltyClaim[];
+  /** Creator royalty rate in basis points (100 = 1%), when the API reports it (#1177). */
+  royaltyRateBps?: number;
 }
 
 export interface RoyaltyClaim {

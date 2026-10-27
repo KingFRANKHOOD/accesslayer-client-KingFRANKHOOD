@@ -55,3 +55,39 @@ export interface CreatorWithdrawalResult {
 	amount: number;
 	record: CreatorWithdrawalRecord;
 }
+
+/**
+ * A single holder's estimated pro-rata share of a revenue distribution.
+ */
+export interface RevenueDistributionPreviewEntry {
+	walletAddress: string;
+	displayName: string;
+	keyCount: number;
+	/** Fraction of the total distributed amount allocated to this holder (0–1). */
+	share: number;
+	/** Estimated XLM allocated to this holder. */
+	estimatedAmount: number;
+}
+
+/**
+ * Historical record of a creator-initiated revenue distribution to key holders.
+ */
+export interface RevenueDistributionRecord {
+	id: string;
+	creatorId: string;
+	/** Total XLM distributed across key holders. */
+	amount: number;
+	timestamp: number;
+	/** Number of key holders that received a pro-rata share. */
+	holderCount: number;
+	wallet?: string;
+	status: 'confirmed';
+}
+
+/**
+ * Result returned upon submitting a distribute_revenue contract call.
+ */
+export interface RevenueDistributionResult {
+	success: true;
+	record: RevenueDistributionRecord;
+}

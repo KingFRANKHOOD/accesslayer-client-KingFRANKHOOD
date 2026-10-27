@@ -7,6 +7,10 @@ import { curveMigrationCacheKey } from '@/services/curveMigration.service';
 import { buildCurveMigrationExecuteCall } from '@/utils/curveMigration.utils';
 import type { CreatorMetadataChange } from '@/utils/creatorMetadata.utils';
 import type { GraduatedCurveMilestone } from '@/components/common/GraduatedCurvePanel';
+import {
+	announcementService,
+	type AnnouncementCategory,
+} from '@/services/announcement.service';
 
 /**
  * Creator-facing contract calls issued from the dashboard tabs
@@ -130,6 +134,73 @@ export function usePlaceAuctionBidMutation(creatorId: string) {
 				queryKey: queryKeys.creators.auctionBids(creatorId),
 			});
 			showToast.success('Bid placed');
+		},
+	});
+}
+
+export interface PlaceSpotlightBidInput {
+	slotId: string;
+	amount: number;
+}
+
+/**
+ * Places a spotlight discovery bid (#1147). The success toast is rendered by
+ * the caller so this hook stays free of JSX.
+ */
+export function usePlaceSpotlightBidMutation(creatorId: string) {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationKey: ['contract', 'place_spotlight_bid', creatorId],
+		mutationFn: ({ slotId, amount }: PlaceSpotlightBidInput) =>
+			submitContractCall('place_spotlight_bid', { creatorId, slotId, amount }),
+		onError: error => {
+			showToast.error(getSignatureErrorMessage(error));
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({
+				queryKey: queryKeys.creators.spotlightAuction(creatorId),
+			});
+			queryClient.invalidateQueries({
+				queryKey: queryKeys.creators.spotlightBids(creatorId),
+			});
+		},
+	});
+}
+
+export interface PostAnnouncementInput {
+	title: string;
+	category: AnnouncementCategory;
+	content: string;
+}
+
+/**
+ * Posts a creator announcement (#1159). The body is pinned to IPFS first so the
+ * contract call receives the content hash, not the raw text.
+ */
+export function usePostAnnouncementMutation(creatorId: string) {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationKey: ['contract', 'post_announcement', creatorId],
+		mutationFn: async ({ title, category, content }: PostAnnouncementInput) => {
+			const contentHash =
+				await announcementService.uploadAnnouncementContent(content);
+			return submitContractCall('post_announcement', {
+				creatorId,
+				title,
+				contentHash,
+				category,
+			});
+		},
+		onError: error => {
+			showToast.error(getSignatureErrorMessage(error));
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({
+				queryKey: queryKeys.creators.announcements(creatorId),
+			});
+			showToast.success('Announcement published');
 		},
 	});
 }

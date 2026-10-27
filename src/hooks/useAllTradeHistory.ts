@@ -10,7 +10,7 @@ export const MAX_TRADE_HISTORY_PAGES = 200;
 
 /**
  * Loads every page of a wallet's trade history (following the cursor) so the
- * portfolio table can filter, paginate and export all matching rows (#1114).
+ * portfolio table can filter, paginate and export all matching rows (#857, #1114).
  */
 export async function fetchAllTrades(wallet: string): Promise<Trade[]> {
 	const trades: Trade[] = [];

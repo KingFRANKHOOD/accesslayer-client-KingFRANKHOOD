@@ -8,6 +8,7 @@ import {
 	Users,
 	Copy,
 	Check,
+	Upload,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -26,15 +27,20 @@ import {
 	formatWhitelistDate,
 	truncateAddress,
 } from '@/utils/whitelist.utils';
+import { isOwnWallet } from '@/utils/isOwnWallet';
+import { creatorKeysContractService } from '@/services/creatorKeysContract.service';
 import type { WhitelistEntry } from '@/services/creatorWhitelist.service';
 
 export interface WhitelistManagementPanelProps {
 	creatorId: string;
+	ownerAddress?: string;
+	connectedAddress?: string;
 	isWhitelistEnabled?: boolean;
 	whitelist?: WhitelistEntry[];
 	onAddAddresses: (addresses: string[]) => Promise<unknown> | void;
 	onRemoveAddress: (address: string) => Promise<unknown> | void;
 	onDisableWhitelist: () => Promise<unknown> | void;
+	onSetWhitelistMode?: (enabled: boolean) => Promise<unknown> | void;
 	isSubmitting?: boolean;
 	className?: string;
 }
@@ -45,11 +51,15 @@ const fieldClass =
 export const WhitelistManagementPanel: React.FC<
 	WhitelistManagementPanelProps
 > = ({
+	creatorId,
+	ownerAddress,
+	connectedAddress,
 	isWhitelistEnabled = true,
 	whitelist = [],
 	onAddAddresses,
 	onRemoveAddress,
 	onDisableWhitelist,
+	onSetWhitelistMode,
 	isSubmitting = false,
 	className,
 }) => {
@@ -59,14 +69,23 @@ export const WhitelistManagementPanel: React.FC<
 
 	const [batchInput, setBatchInput] = useState('');
 	const [batchError, setBatchError] = useState<string | null>(null);
+	const [csvFileName, setCsvFileName] = useState<string | null>(null);
 
 	const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
 
 	// Removal confirmation modal state
 	const [walletToRemove, setWalletToRemove] = useState<string | null>(null);
 
-	// Disable whitelist warning modal state
+	// Disable / Enable whitelist confirmation modal states
 	const [showDisableModal, setShowDisableModal] = useState(false);
+	const [showEnableModal, setShowEnableModal] = useState(false);
+
+	if (
+		ownerAddress !== undefined &&
+		!isOwnWallet(connectedAddress, ownerAddress)
+	) {
+		return null;
+	}
 
 	const handleCopy = async (address: string) => {
 		try {
@@ -103,6 +122,11 @@ export const WhitelistManagementPanel: React.FC<
 		}
 
 		setSingleError(null);
+		await creatorKeysContractService.add_to_whitelist({
+			creatorId,
+			address: trimmed,
+			addresses: [trimmed],
+		});
 		await onAddAddresses([trimmed]);
 		setSingleAddress('');
 	};
@@ -125,19 +149,80 @@ export const WhitelistManagementPanel: React.FC<
 		}
 
 		setBatchError(null);
+		await creatorKeysContractService.add_to_whitelist({
+			creatorId,
+			addresses: valid,
+		});
 		await onAddAddresses(valid);
 		setBatchInput('');
+		setCsvFileName(null);
+	};
+
+	const handleCsvUpload = async (
+		e: React.ChangeEvent<HTMLInputElement>
+	) => {
+		const file = e.target.files?.[0];
+		if (!file) return;
+		setCsvFileName(file.name);
+		setInputMode('batch');
+
+		const text = await (typeof file.text === 'function'
+			? file.text()
+			: new Promise<string>((resolve, reject) => {
+					const reader = new FileReader();
+					reader.onload = () => resolve(String(reader.result ?? ''));
+					reader.onerror = () => reject(reader.error);
+					reader.readAsText(file);
+				}));
+
+		setBatchInput(text);
+		const { valid, invalid } = parseBatchWhitelist(text);
+		if (valid.length > 0) {
+			setBatchError(null);
+			await creatorKeysContractService.add_to_whitelist({
+				creatorId,
+				addresses: valid,
+			});
+			await onAddAddresses(valid);
+		} else if (invalid.length > 0) {
+			setBatchError(
+				`No valid addresses found in CSV. ${invalid.length} invalid entr${
+					invalid.length === 1 ? 'y' : 'ies'
+				}.`
+			);
+		}
 	};
 
 	const handleConfirmRemove = async () => {
 		if (!walletToRemove) return;
+		await creatorKeysContractService.remove_from_whitelist({
+			creatorId,
+			address: walletToRemove,
+		});
 		await onRemoveAddress(walletToRemove);
 		setWalletToRemove(null);
 	};
 
 	const handleConfirmDisable = async () => {
-		await onDisableWhitelist();
+		await creatorKeysContractService.set_whitelist_mode({
+			creatorId,
+			enabled: false,
+		});
+		if (onSetWhitelistMode) {
+			await onSetWhitelistMode(false);
+		} else {
+			await onDisableWhitelist();
+		}
 		setShowDisableModal(false);
+	};
+
+	const handleConfirmEnable = async () => {
+		await creatorKeysContractService.set_whitelist_mode({
+			creatorId,
+			enabled: true,
+		});
+		await onSetWhitelistMode?.(true);
+		setShowEnableModal(false);
 	};
 
 	const batchParsed = parseBatchWhitelist(batchInput);
@@ -182,6 +267,33 @@ export const WhitelistManagementPanel: React.FC<
 				</div>
 
 				<div className="flex items-center gap-3">
+					<button
+						type="button"
+						role="switch"
+						aria-checked={isWhitelistEnabled}
+						aria-label="Toggle whitelist mode"
+						data-testid="whitelist-mode-switch"
+						disabled={isSubmitting}
+						onClick={() => {
+							if (isWhitelistEnabled) {
+								setShowDisableModal(true);
+							} else {
+								setShowEnableModal(true);
+							}
+						}}
+						className={cn(
+							'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none',
+							isWhitelistEnabled ? 'bg-emerald-500' : 'bg-white/20',
+							isSubmitting && 'cursor-not-allowed opacity-50'
+						)}
+					>
+						<span
+							className={cn(
+								'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform',
+								isWhitelistEnabled ? 'translate-x-5' : 'translate-x-0'
+							)}
+						/>
+					</button>
 					<Button
 						type="button"
 						variant={isWhitelistEnabled ? 'destructive' : 'outline'}
@@ -223,37 +335,55 @@ export const WhitelistManagementPanel: React.FC<
 					className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-4"
 					data-testid="whitelist-add-form-container"
 				>
-					<div className="flex items-center justify-between">
+					<div className="flex flex-wrap items-center justify-between gap-2">
 						<h3 className="text-xs font-bold uppercase tracking-[0.18em] text-white/60">
 							Add Approved Wallets
 						</h3>
-						<div className="flex items-center rounded-lg border border-white/10 bg-white/[0.03] p-0.5 text-xs">
-							<button
-								type="button"
-								data-testid="whitelist-mode-single"
-								onClick={() => setInputMode('single')}
-								className={cn(
-									'rounded-md px-3 py-1 font-semibold transition-all',
-									inputMode === 'single'
-										? 'bg-amber-400/20 text-amber-300'
-										: 'text-white/60 hover:text-white'
-								)}
+						<div className="flex items-center gap-2">
+							<label
+								htmlFor="whitelist-csv-file"
+								className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-white/70 transition-colors hover:border-amber-400/40 hover:text-amber-300"
 							>
-								Single Address
-							</button>
-							<button
-								type="button"
-								data-testid="whitelist-mode-batch"
-								onClick={() => setInputMode('batch')}
-								className={cn(
-									'rounded-md px-3 py-1 font-semibold transition-all',
-									inputMode === 'batch'
-										? 'bg-amber-400/20 text-amber-300'
-										: 'text-white/60 hover:text-white'
-								)}
-							>
-								Batch Paste
-							</button>
+								<Upload className="size-3.5" />
+								<span>{csvFileName ?? 'Import CSV'}</span>
+								<input
+									id="whitelist-csv-file"
+									data-testid="whitelist-csv-upload"
+									type="file"
+									accept=".csv,.txt,text/csv"
+									onChange={handleCsvUpload}
+									disabled={isSubmitting}
+									className="sr-only"
+								/>
+							</label>
+							<div className="flex items-center rounded-lg border border-white/10 bg-white/[0.03] p-0.5 text-xs">
+								<button
+									type="button"
+									data-testid="whitelist-mode-single"
+									onClick={() => setInputMode('single')}
+									className={cn(
+										'rounded-md px-3 py-1 font-semibold transition-all',
+										inputMode === 'single'
+											? 'bg-amber-400/20 text-amber-300'
+											: 'text-white/60 hover:text-white'
+									)}
+								>
+									Single Address
+								</button>
+								<button
+									type="button"
+									data-testid="whitelist-mode-batch"
+									onClick={() => setInputMode('batch')}
+									className={cn(
+										'rounded-md px-3 py-1 font-semibold transition-all',
+										inputMode === 'batch'
+											? 'bg-amber-400/20 text-amber-300'
+											: 'text-white/60 hover:text-white'
+									)}
+								>
+									Batch Paste
+								</button>
+							</div>
 						</div>
 					</div>
 
@@ -578,6 +708,47 @@ export const WhitelistManagementPanel: React.FC<
 							disabled={isSubmitting}
 						>
 							Confirm & Disable
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Enable Whitelist Mode Confirmation Modal */}
+			<Dialog
+				open={showEnableModal}
+				onOpenChange={open => !open && setShowEnableModal(false)}
+			>
+				<DialogContent
+					data-testid="enable-whitelist-modal"
+					className="border-white/10 bg-[#091528] text-white sm:max-w-md"
+				>
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2 text-emerald-400">
+							<ShieldCheck className="size-5 shrink-0" />
+							Enable Early Access Whitelist
+						</DialogTitle>
+						<DialogDescription className="text-white/70">
+							Enabling whitelist mode restricts purchases of this creator
+							key to approved wallet addresses.
+						</DialogDescription>
+					</DialogHeader>
+
+					<DialogFooter className="gap-2 sm:gap-0">
+						<Button
+							type="button"
+							variant="outline"
+							data-testid="cancel-enable-whitelist-btn"
+							onClick={() => setShowEnableModal(false)}
+						>
+							Cancel
+						</Button>
+						<Button
+							type="button"
+							data-testid="confirm-enable-whitelist-btn"
+							onClick={handleConfirmEnable}
+							disabled={isSubmitting}
+						>
+							Confirm & Enable
 						</Button>
 					</DialogFooter>
 				</DialogContent>

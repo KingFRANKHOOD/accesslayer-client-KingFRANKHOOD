@@ -1,9 +1,12 @@
 import { BaseApiService, type APIResponse } from './api.service';
 import { cacheManager } from '@/utils/cache.utils';
+import { submitCreatorContractCall } from '@/hooks/useCreatorContractActions';
 import type {
 	CreatorRevenueSummary,
 	CreatorWithdrawalRecord,
 	CreatorWithdrawalResult,
+	RevenueDistributionRecord,
+	RevenueDistributionResult,
 	RevenueHistoryPoint,
 	RevenueTimeRange,
 } from '@/types/creatorRevenue';
@@ -11,7 +14,9 @@ import {
 	aggregateRevenueSummary,
 	buildMockWithdrawalTxHash,
 	generateMockRevenueHistory,
+	loadCreatorDistributionHistory,
 	loadCreatorWithdrawalHistory,
+	saveCreatorDistributionHistory,
 	saveCreatorWithdrawalHistory,
 } from '@/utils/creatorRevenue.utils';
 
@@ -185,6 +190,44 @@ class CreatorRevenueService extends BaseApiService {
 	}
 
 	/**
+	 * Distributes revenue to key holders pro-rata via the contract's
+	 * `distribute_revenue` function (`{ creatorId, amount, holderCount, wallet }`).
+	 * On success the confirmed distribution record is persisted locally so the
+	 * dashboard history list updates immediately.
+	 */
+	async distributeRevenue(
+		creatorId: string,
+		amount: number,
+		holderCount: number,
+		wallet?: string
+	): Promise<RevenueDistributionResult> {
+		await submitCreatorContractCall('distribute_revenue', {
+			creatorId,
+			amount,
+			holderCount,
+			wallet,
+		});
+
+		const timestamp = Date.now();
+		const record: RevenueDistributionRecord = {
+			id: `dist-${timestamp}`,
+			creatorId,
+			amount,
+			timestamp,
+			holderCount,
+			wallet,
+			status: 'confirmed',
+		};
+
+		const current = loadCreatorDistributionHistory(creatorId);
+		saveCreatorDistributionHistory(creatorId, [record, ...current]);
+
+		this.invalidateCreatorRevenue(creatorId);
+
+		return { success: true, record };
+	}
+
+	/**
 	 * Clears cached summary and history for a creator after a claim.
 	 */
 	invalidateCreatorRevenue(creatorId: string): void {
@@ -241,6 +284,23 @@ export async function submitCreatorWithdrawal(
 	return creatorRevenueService.withdrawCreatorRevenue(
 		creatorId,
 		amount,
+		wallet
+	);
+}
+
+/**
+ * Convenience wrapper for submitting a `distribute_revenue` contract call.
+ */
+export async function submitRevenueDistribution(
+	creatorId: string,
+	amount: number,
+	holderCount: number,
+	wallet?: string
+): Promise<RevenueDistributionResult> {
+	return creatorRevenueService.distributeRevenue(
+		creatorId,
+		amount,
+		holderCount,
 		wallet
 	);
 }

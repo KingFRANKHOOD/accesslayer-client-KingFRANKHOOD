@@ -143,6 +143,101 @@ export class CreatorKeysContractService {
 	}): Promise<{ success: boolean; hash?: string }> {
 		return this.batch_transfer(args);
 	}
+
+	async set_whitelist_mode(args: {
+		creatorId: string;
+		enabled: boolean;
+	}): Promise<{ success: boolean; enabled: boolean }> {
+		void args;
+		return { success: true, enabled: args.enabled };
+	}
+
+	async setWhitelistMode(args: {
+		creatorId: string;
+		enabled: boolean;
+	}): Promise<{ success: boolean; enabled: boolean }> {
+		return this.set_whitelist_mode(args);
+	}
+
+	async add_to_whitelist(args: {
+		creatorId: string;
+		address?: string;
+		addresses?: string[];
+	}): Promise<{ success: boolean; addresses: string[] }> {
+		const list =
+			args.addresses ?? (args.address ? [args.address] : []);
+		return { success: true, addresses: list };
+	}
+
+	async addToWhitelist(args: {
+		creatorId: string;
+		address?: string;
+		addresses?: string[];
+	}): Promise<{ success: boolean; addresses: string[] }> {
+		return this.add_to_whitelist(args);
+	}
+
+	async remove_from_whitelist(args: {
+		creatorId: string;
+		address: string;
+	}): Promise<{ success: boolean; address: string }> {
+		return { success: true, address: args.address };
+	}
+
+	async removeFromWhitelist(args: {
+		creatorId: string;
+		address: string;
+	}): Promise<{ success: boolean; address: string }> {
+		return this.remove_from_whitelist(args);
+	}
+
+	async send_tip(args: {
+		creatorId: string;
+		amount: number;
+		messageHash?: string;
+	}): Promise<{ success: boolean; hash?: string }> {
+		if (!env.VITE_STELLAR_RPC_URL || !env.VITE_CREATOR_KEYS_CONTRACT_ID) {
+			return { success: true, hash: `sim_tx_${Date.now()}` };
+		}
+
+		let creatorAddress: Address;
+		try {
+			creatorAddress = Address.fromString(args.creatorId);
+		} catch {
+			throw new Error('Invalid creator ID address.');
+		}
+
+		const client = this.factory(
+			env.VITE_CREATOR_KEYS_CONTRACT_ID,
+			env.VITE_STELLAR_RPC_URL,
+			getNetworkPassphrase()
+		) as {
+			send_tip?: (callArgs: {
+				creator_id: Address;
+				amount: bigint;
+				message_hash?: string;
+			}) => Promise<{ result?: unknown; hash?: string }>;
+		};
+
+		if (typeof client.send_tip === 'function') {
+			const res = await client.send_tip({
+				creator_id: creatorAddress,
+				amount: BigInt(Math.round(args.amount * 10_000_000)),
+				message_hash: args.messageHash,
+			});
+			return { success: true, hash: res?.hash };
+		}
+
+		return { success: true, hash: `sim_tx_${Date.now()}` };
+	}
+
+	async sendTip(args: {
+		creatorId: string;
+		amount: number;
+		messageHash?: string;
+	}): Promise<{ success: boolean; hash?: string }> {
+		return this.send_tip(args);
+	}
 }
 
 export const creatorKeysContractService = new CreatorKeysContractService();

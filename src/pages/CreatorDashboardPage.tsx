@@ -1,6 +1,9 @@
+import { useMemo } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useAccount } from 'wagmi';
 import { useCreatorDetail } from '@/hooks/useCreators';
+import { useWalletHoldings } from '@/hooks/useWallet';
+import { useCreatorPrices } from '@/hooks/useCreatorPrices';
 import { CreatorDashboardSkeleton } from '@/components/common/CreatorSkeleton';
 import { ProfileTabPillGroup } from '@/components/common/ProfileTabPill';
 import CreatorMetadataForm from '@/components/common/CreatorMetadataForm';
@@ -8,6 +11,7 @@ import AuctionSetupPanel from '@/components/common/AuctionSetupPanel';
 import LaunchPenaltyPanel from '@/components/common/LaunchPenaltyPanel';
 import MaxBuyQuantityPanel from '@/components/common/MaxBuyQuantityPanel';
 import QuorumSettingsPanel from '@/components/common/QuorumSettingsPanel';
+import ContentGatePanel from '@/components/common/ContentGatePanel';
 import GraduatedCurvePanel from '@/components/common/GraduatedCurvePanel';
 import BuyCooldownPanel from '@/components/common/BuyCooldownPanel';
 import DeprecateKeyPanel from '@/components/common/DeprecateKeyPanel';
@@ -41,6 +45,9 @@ import { useUpdateCreatorProfile } from '@/hooks/useUpdateCreatorProfile';
 
 import { GraduatedCurveMilestoneChart } from '@/components/common/GraduatedCurveMilestoneChart';
 import CreatorRevenuePanel from '@/components/common/CreatorRevenuePanel';
+import DistributeRevenuePanel from '@/components/common/DistributeRevenuePanel';
+import CreatorAnnouncementsPanel from '@/components/common/CreatorAnnouncementsPanel';
+import VestingSchedulesViewer from '@/components/creator/VestingSchedulesViewer';
 
 const TABS = [
 	{ label: 'Overview', value: 'overview' },
@@ -84,6 +91,7 @@ export default function CreatorDashboardPage() {
 		addAddresses: addWhitelistAddresses,
 		removeAddress: removeWhitelistAddress,
 		disableWhitelist,
+		setWhitelistMode,
 		isAdding: isAddingWhitelist,
 		isRemoving: isRemovingWhitelist,
 		isDisabling: isDisablingWhitelist,
@@ -105,6 +113,30 @@ export default function CreatorDashboardPage() {
 	);
 
 	const claimVestedTokens = useClaimVestedTokensMutation(id, address ?? '');
+
+	// Keys to check for the wallet's vesting allocations (#1117): the key this
+	// dashboard belongs to plus every key the wallet currently holds, so the
+	// viewer can list all active schedules in one place.
+	const { data: walletHoldings = [] } = useWalletHoldings(address ?? '');
+	const { data: allCreators = [] } = useCreatorPrices();
+
+	const viewerKeyIds = useMemo(() => {
+		const ids = new Set<string>();
+		if (id) ids.add(id);
+		for (const holding of walletHoldings) {
+			if (holding.creatorId) ids.add(holding.creatorId);
+		}
+		return [...ids];
+	}, [id, walletHoldings]);
+
+	const viewerKeyNames = useMemo(() => {
+		const map: Record<string, string | undefined> = {};
+		if (id) map[id] = creator?.title;
+		for (const candidate of allCreators) {
+			map[candidate.id] = candidate.title;
+		}
+		return map;
+	}, [id, creator, allCreators]);
 
 	// Curve migrations change the pricing every holder buys at, so the panel is
 	// creator-only for the same reason the vesting schedule is: the query stays
@@ -183,6 +215,14 @@ export default function CreatorDashboardPage() {
 							data-testid="creator-dashboard-revenue-link"
 						>
 							Revenue & withdrawals
+						</Link>
+
+						<Link
+							to={`/creator/${id}/spotlight`}
+							className="inline-flex items-center gap-1.5 text-sm font-semibold text-sky-300 underline-offset-4 hover:text-sky-200 hover:underline"
+							data-testid="creator-dashboard-spotlight-link"
+						>
+							Spotlight auction
 						</Link>
 					</div>
 				</div>
@@ -271,6 +311,25 @@ export default function CreatorDashboardPage() {
 					</div>
 				)}
 
+				{activeTab === 'overview' && (
+					<section
+						className={CARD_CLASS}
+						aria-labelledby="dashboard-announcements-heading"
+						data-testid="dashboard-announcements-section"
+					>
+						<h2
+							id="dashboard-announcements-heading"
+							className="mb-1 font-grotesque text-xl font-black tracking-tight"
+						>
+							Announcements
+						</h2>
+						<p className="mb-6 text-sm text-white/50">
+							Post updates to your key holders.
+						</p>
+						<CreatorAnnouncementsPanel creatorId={id} />
+					</section>
+				)}
+
 				{activeTab === 'revenue' && (
 					<div
 						className="space-y-8"
@@ -280,6 +339,14 @@ export default function CreatorDashboardPage() {
 						data-testid="dashboard-revenue-panel"
 					>
 						<CreatorRevenuePanel creatorId={id} wallet={address} />
+
+						{/* Revenue distribution to key holders — creator wallets only */}
+						{isKeyCreator && (
+							<DistributeRevenuePanel
+								creatorId={id}
+								wallet={address}
+							/>
+						)}
 					</div>
 				)}
 
@@ -396,24 +463,29 @@ export default function CreatorDashboardPage() {
 							/>
 						</section>
 
-						<section
-							className={CARD_CLASS}
-							data-testid="whitelist-section"
-						>
-							<WhitelistManagementPanel
-								creatorId={id}
-								isWhitelistEnabled={isWhitelistEnabled}
-								whitelist={whitelistEntries}
-								onAddAddresses={addWhitelistAddresses}
-								onRemoveAddress={removeWhitelistAddress}
-								onDisableWhitelist={disableWhitelist}
-								isSubmitting={
-									isAddingWhitelist ||
-									isRemovingWhitelist ||
-									isDisablingWhitelist
-								}
-							/>
-						</section>
+						{isKeyCreator && (
+							<section
+								className={CARD_CLASS}
+								data-testid="whitelist-section"
+							>
+								<WhitelistManagementPanel
+									creatorId={id}
+									ownerAddress={creator.instructorId}
+									connectedAddress={address}
+									isWhitelistEnabled={isWhitelistEnabled}
+									whitelist={whitelistEntries}
+									onAddAddresses={addWhitelistAddresses}
+									onRemoveAddress={removeWhitelistAddress}
+									onDisableWhitelist={disableWhitelist}
+									onSetWhitelistMode={setWhitelistMode}
+									isSubmitting={
+										isAddingWhitelist ||
+										isRemovingWhitelist ||
+										isDisablingWhitelist
+									}
+								/>
+							</section>
+						)}
 
 						<section
 							className={CARD_CLASS}
@@ -477,6 +549,21 @@ export default function CreatorDashboardPage() {
 								isSubmitting={setMaxBuyQuantity.isPending}
 								onSubmit={value => setMaxBuyQuantity.mutate(value)}
 							/>
+						</section>
+
+						<section
+							className={CARD_CLASS}
+							data-testid="content-gate-section"
+						>
+							<h2 className="mb-1 font-grotesque text-xl font-black tracking-tight">
+								Content Gate
+							</h2>
+
+							<p className="mb-6 text-sm text-white/50">
+								Choose who can view the gated content attached to this key.
+							</p>
+
+							<ContentGatePanel creatorId={id} wallet={address} />
 						</section>
 
 						<section
@@ -548,6 +635,30 @@ export default function CreatorDashboardPage() {
 									onClaim={() =>
 										claimVestedTokens.mutate(vesting.claimableAmount)
 									}
+								/>
+							</section>
+						)}
+
+						{/* Multi-key vesting schedules viewer (#1117) — creator wallets only */}
+						{isKeyCreator && (
+							<section
+								className={CARD_CLASS}
+								data-testid="vesting-schedules-viewer-section"
+							>
+								<h2 className="mb-1 font-grotesque text-xl font-black tracking-tight">
+									Vesting Schedules
+								</h2>
+
+								<p className="mb-6 text-sm text-white/50">
+									Every vesting allocation registered to this wallet
+									across your keys, with claimable amounts and the next
+									unlock countdown.
+								</p>
+
+								<VestingSchedulesViewer
+									wallet={address ?? ''}
+									keyIds={viewerKeyIds}
+									keyNames={viewerKeyNames}
 								/>
 							</section>
 						)}

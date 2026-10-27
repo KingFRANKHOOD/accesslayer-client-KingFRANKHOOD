@@ -9,11 +9,21 @@ import {
 	buildMockWithdrawalTxHash,
 	generateMockRevenueHistory,
 	getCreatorWithdrawalStorageKey,
+	MIN_DISTRIBUTION_AMOUNT_XLM,
+	getEligibleDistributionHolders,
+	computeDistributionPreview,
+	getDistributionAmountError,
+	parseDistributionAmount,
+	getCreatorDistributionStorageKey,
+	loadCreatorDistributionHistory,
+	saveCreatorDistributionHistory,
 } from '../creatorRevenue.utils';
 import type {
 	CreatorWithdrawalRecord,
+	RevenueDistributionRecord,
 	RevenueHistoryPoint,
 } from '@/types/creatorRevenue';
+import type { KeyHolderEntry } from '@/services/course.service';
 
 describe('creatorRevenue.utils', () => {
 	describe('calculateTotalEarnings', () => {
@@ -225,6 +235,143 @@ describe('creatorRevenue.utils', () => {
 			const hash = buildMockWithdrawalTxHash();
 			expect(hash).toHaveLength(64);
 			expect(/^[0-9a-f]{64}$/.test(hash)).toBe(true);
+		});
+	});
+
+	describe('distribution amount validation', () => {
+		it('enforces the minimum distribution amount', () => {
+			expect(MIN_DISTRIBUTION_AMOUNT_XLM).toBe(1);
+			expect(getDistributionAmountError('0.5')).toBe(
+				'Minimum distribution is 1 XLM'
+			);
+			expect(getDistributionAmountError('0')).toBe(
+				'Minimum distribution is 1 XLM'
+			);
+			expect(getDistributionAmountError('')).toBe(
+				'Distribution amount is required'
+			);
+			expect(getDistributionAmountError('abc')).toBe('Enter a valid number');
+			expect(getDistributionAmountError('1')).toBeNull();
+			expect(getDistributionAmountError('100.25')).toBeNull();
+		});
+
+		it('parses raw amount inputs strictly', () => {
+			expect(parseDistributionAmount('12.5')).toBe(12.5);
+			expect(parseDistributionAmount(' 7 ')).toBe(7);
+			expect(parseDistributionAmount('')).toBeNull();
+			expect(parseDistributionAmount('12abc')).toBeNull();
+		});
+	});
+
+	describe('computeDistributionPreview', () => {
+		const holders: KeyHolderEntry[] = [
+			{
+				id: 'h1',
+				displayName: 'Alice',
+				walletAddress: 'GALICE',
+				keyCount: 60,
+			},
+			{ id: 'h2', displayName: 'Bob', walletAddress: 'GBOB', keyCount: 30 },
+			{
+				id: 'h3',
+				displayName: 'Carol',
+				walletAddress: 'GCAROL',
+				keyCount: 10,
+			},
+			{
+				id: 'h4',
+				displayName: 'No Keys',
+				walletAddress: 'GZERO',
+				keyCount: 0,
+			},
+		];
+
+		it('sorts eligible holders by key count and drops zero-key holders', () => {
+			const eligible = getEligibleDistributionHolders(holders);
+			expect(eligible.map(h => h.walletAddress)).toEqual([
+				'GALICE',
+				'GBOB',
+				'GCAROL',
+			]);
+		});
+
+		it('computes accurate pro-rata estimates for the top holders', () => {
+			const preview = computeDistributionPreview(holders, 100);
+			expect(preview).toHaveLength(3);
+			expect(preview[0].walletAddress).toBe('GALICE');
+			expect(preview[0].share).toBeCloseTo(0.6, 5);
+			expect(preview[0].estimatedAmount).toBe(60);
+			expect(preview[1].estimatedAmount).toBe(30);
+			expect(preview[2].estimatedAmount).toBe(10);
+		});
+
+		it('respects the preview limit', () => {
+			const preview = computeDistributionPreview(holders, 100, 2);
+			expect(preview).toHaveLength(2);
+			expect(preview[0].walletAddress).toBe('GALICE');
+			expect(preview[1].walletAddress).toBe('GBOB');
+		});
+
+		it('returns an empty preview for invalid amounts or no holders', () => {
+			expect(computeDistributionPreview(holders, 0)).toEqual([]);
+			expect(computeDistributionPreview(holders, NaN)).toEqual([]);
+			expect(computeDistributionPreview([], 100)).toEqual([]);
+		});
+	});
+
+	describe('Distribution storage persistence', () => {
+		const mockStorage = (() => {
+			let store: Record<string, string> = {};
+			return {
+				getItem: (key: string) => store[key] ?? null,
+				setItem: (key: string, val: string) => {
+					store[key] = val;
+				},
+				clear: () => {
+					store = {};
+				},
+			};
+		})();
+
+		it('saves and loads distribution history newest first', () => {
+			mockStorage.clear();
+			const records: RevenueDistributionRecord[] = [
+				{
+					id: 'dist-1',
+					creatorId: 'c1',
+					amount: 40,
+					timestamp: 1700000000000,
+					holderCount: 5,
+					status: 'confirmed',
+				},
+				{
+					id: 'dist-2',
+					creatorId: 'c1',
+					amount: 80,
+					timestamp: 1700000060000,
+					holderCount: 8,
+					status: 'confirmed',
+				},
+			];
+
+			saveCreatorDistributionHistory('c1', records, mockStorage);
+			const loaded = loadCreatorDistributionHistory('c1', mockStorage);
+			expect(loaded.length).toBe(2);
+			expect(loaded[0].id).toBe('dist-2');
+			expect(loaded[1].id).toBe('dist-1');
+		});
+
+		it('returns an empty array for missing or corrupted payloads', () => {
+			expect(loadCreatorDistributionHistory('unknown', mockStorage)).toEqual(
+				[]
+			);
+			mockStorage.setItem(
+				getCreatorDistributionStorageKey('corrupt'),
+				'invalid-json'
+			);
+			expect(loadCreatorDistributionHistory('corrupt', mockStorage)).toEqual(
+				[]
+			);
 		});
 	});
 });

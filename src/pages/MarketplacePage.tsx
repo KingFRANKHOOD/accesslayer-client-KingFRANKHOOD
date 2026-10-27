@@ -16,6 +16,7 @@ import SearchBar from '@/components/common/SearchBar';
 import SectionDivider from '@/components/common/SectionDivider';
 import StickyFilterBar from '@/components/common/StickyFilterBar';
 import TrendingCreatorsSection from '@/components/marketplace/TrendingCreatorsSection';
+import SpotlightBanner from '@/components/marketplace/SpotlightBanner';
 import { Button } from '@/components/ui/button';
 import SectionErrorBoundary from '@/components/common/SectionErrorBoundary';
 import {
@@ -214,6 +215,10 @@ export default function MarketplacePage() {
 					id="marketplace-listing-main"
 					aria-label="Creator key marketplace listing"
 				>
+					<SectionErrorBoundary sectionName="spotlight">
+						<SpotlightBanner />
+					</SectionErrorBoundary>
+
 					<SectionErrorBoundary sectionName="trending creators">
 						<TrendingCreatorsSection />
 					</SectionErrorBoundary>

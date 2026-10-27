@@ -47,6 +47,8 @@ export interface BondingCurveChartProps {
 	showTwapOverlay?: boolean;
 	onToggleOverlay?: (show: boolean) => void;
 	isTwapLoading?: boolean;
+	/** Configured price floor in stroops (#1152). Overlays a dashed horizontal line when > 0. */
+	priceFloorStroops?: number | null;
 }
 
 export interface CustomTooltipProps {
@@ -63,6 +65,7 @@ export interface CustomTooltipProps {
 	twapWindow?: TwapWindow;
 	spotPriceStroops?: number | null;
 	showTwapOverlay?: boolean;
+	priceFloorStroops?: number | null;
 }
 
 export const CustomTooltip: React.FC<CustomTooltipProps> = ({
@@ -72,6 +75,7 @@ export const CustomTooltip: React.FC<CustomTooltipProps> = ({
 	twapWindow = '24h',
 	spotPriceStroops,
 	showTwapOverlay = true,
+	priceFloorStroops,
 }) => {
 	if (!active || !payload || !payload.length) return null;
 
@@ -104,6 +108,14 @@ export const CustomTooltip: React.FC<CustomTooltipProps> = ({
 			</div>
 			{data.label && (
 				<p className="mt-1 text-xs text-amber-400/60">{data.label}</p>
+			)}
+			{priceFloorStroops != null && priceFloorStroops > 0 && (
+				<div className="mt-1 flex items-center justify-between gap-2 text-xs" data-testid="tooltip-price-floor">
+					<span className="text-white/50">Floor:</span>
+					<span className="font-bold text-rose-400">
+						{formatDisplayKeyPrice(priceFloorStroops)}
+					</span>
+				</div>
 			)}
 
 			{hasTwap && (
@@ -157,6 +169,7 @@ const BondingCurveChart: React.FC<BondingCurveChartProps> = ({
 	showTwapOverlay,
 	onToggleOverlay,
 	isTwapLoading,
+	priceFloorStroops,
 }) => {
 	// Mobile-tuned axis layout (#1055): at <768px the chart is ~315px wide
 	// inside the page padding, so we use tighter margins, straight x-ticks
@@ -327,21 +340,34 @@ const BondingCurveChart: React.FC<BondingCurveChartProps> = ({
 								)}
 							>
 								1H
-							</button>
-							<button
-								type="button"
-								data-testid="twap-window-24h"
-								aria-pressed={effectiveTwapWindow === '24h' && isOverlayVisible}
-								onClick={() => handleTwapWindowChange('24h')}
-								className={cn(
-									'rounded-md px-3 py-1 text-xs font-bold tracking-wider transition-colors',
-									effectiveTwapWindow === '24h' && isOverlayVisible
-										? 'bg-emerald-400 text-slate-950 shadow-sm'
-										: 'text-white/55 hover:bg-white/10 hover:text-white'
-								)}
-							>
-								24H
-							</button>
+							</button>                            <button
+                                type="button"
+                                data-testid="twap-window-4h"
+                                aria-pressed={effectiveTwapWindow === '4h' && isOverlayVisible}
+                                onClick={() => handleTwapWindowChange('4h')}
+                                className={cn(
+                                    'rounded-md px-3 py-1 text-xs font-bold tracking-wider transition-colors',
+                                    effectiveTwapWindow === '4h' && isOverlayVisible
+                                        ? 'bg-emerald-400 text-slate-950 shadow-sm'
+                                        : 'text-white/55 hover:bg-white/10 hover:text-white'
+                                )}
+                            >
+                                4H
+                            </button>
+                            <button
+                                type="button"
+                                data-testid="twap-window-24h"
+                                aria-pressed={effectiveTwapWindow === '24h' && isOverlayVisible}
+                                onClick={() => handleTwapWindowChange('24h')}
+                                className={cn(
+                                    'rounded-md px-3 py-1 text-xs font-bold tracking-wider transition-colors',
+                                    effectiveTwapWindow === '24h' && isOverlayVisible
+                                        ? 'bg-emerald-400 text-slate-950 shadow-sm'
+                                        : 'text-white/55 hover:bg-white/10 hover:text-white'
+                                )}
+                            >
+                                24H
+                            </button>
 						</div>
 
 						{twapPriceStroops != null && (
@@ -402,6 +428,7 @@ const BondingCurveChart: React.FC<BondingCurveChartProps> = ({
 									twapWindow={effectiveTwapWindow}
 									spotPriceStroops={spotPriceStroops ?? effectiveCurrentPriceStroops}
 									showTwapOverlay={isOverlayVisible}
+									priceFloorStroops={priceFloorStroops}
 								/>
 							}
 						/>
@@ -414,6 +441,23 @@ const BondingCurveChart: React.FC<BondingCurveChartProps> = ({
 							activeDot={{ r: 6, fill: '#f59e0b', stroke: '#1e293b', strokeWidth: 2 }}
 							name="Bonding Curve Price"
 						/>
+						{/* Price floor indicator line (#1152) */}
+						{priceFloorStroops != null && priceFloorStroops > 0 && (
+							<ReferenceLine
+								y={priceFloorStroops}
+								stroke="#f43f5e"
+								strokeWidth={1.5}
+								strokeDasharray="4 4"
+								data-testid="price-floor-line"
+								label={{
+									value: `Floor: ${formatDisplayKeyPrice(priceFloorStroops)}`,
+									position: 'insideTopRight',
+									fill: '#f43f5e',
+									fontSize: 11,
+									fontWeight: 600,
+								}}
+							/>
+						)}
 						{/* TWAP overlay line (#931) */}
 						{isOverlayVisible && twapPriceStroops != null && (
 							<Line
@@ -485,7 +529,7 @@ const BondingCurveChart: React.FC<BondingCurveChartProps> = ({
 			</div>
 
 			{/* Chart Legend */}
-			{shouldShowTwapControls && (
+			{(shouldShowTwapControls || (priceFloorStroops != null && priceFloorStroops > 0)) && (
 				<div
 					className="mt-3 flex flex-wrap items-center gap-4 text-xs"
 					data-testid="chart-legend"
@@ -505,6 +549,20 @@ const BondingCurveChart: React.FC<BondingCurveChartProps> = ({
 							/>
 							<span className="font-semibold text-emerald-400">
 								TWAP ({effectiveTwapWindow})
+							</span>
+						</div>
+					)}
+					{priceFloorStroops != null && priceFloorStroops > 0 && (
+						<div
+							className="flex items-center gap-1.5"
+							data-testid="price-floor-legend-indicator"
+						>
+							<span
+								className="h-0.5 w-3 rounded border-b-2 border-dashed border-[#f43f5e]"
+								style={{ borderBottom: '2px dashed #f43f5e' }}
+							/>
+							<span className="font-semibold text-rose-400" data-testid="price-floor-label">
+								Floor ({formatDisplayKeyPrice(priceFloorStroops)})
 							</span>
 						</div>
 					)}

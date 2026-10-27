@@ -1,6 +1,17 @@
-import { ArrowDownRight, ArrowUpRight, History } from 'lucide-react';
+import {
+	ArrowDownRight,
+	ArrowUpRight,
+	Coins,
+	History,
+	Send,
+	type LucideIcon,
+} from 'lucide-react';
+import ActionAttributionLabel from '@/components/common/ActionAttributionLabel';
 import { useCreatorActivityFeed } from '@/hooks/useCreatorActivityFeed';
-import { creatorActivityService } from '@/services/creatorActivity.service';
+import {
+	creatorActivityService,
+	type CreatorActivityType,
+} from '@/services/creatorActivity.service';
 import { useRelativeTime } from '@/hooks/useRelativeTime';
 import { formatCreatorHandle } from '@/utils/handleDisplay.utils';
 
@@ -10,12 +21,33 @@ export interface CreatorActivityFeedProps {
 
 const SKELETON_ROW_COUNT = 3;
 
+const ACTIVITY_TYPE_CONFIG: Record<
+	CreatorActivityType,
+	{ label: string; icon: LucideIcon; iconClass: string }
+> = {
+	buy: { label: 'Buy', icon: ArrowUpRight, iconClass: 'text-emerald-400' },
+	sell: { label: 'Sell', icon: ArrowDownRight, iconClass: 'text-rose-400' },
+	royalty_claim: {
+		label: 'Royalty claim',
+		icon: Coins,
+		iconClass: 'text-amber-300',
+	},
+	revenue_distribution: {
+		label: 'Revenue distribution',
+		icon: Send,
+		iconClass: 'text-sky-300',
+	},
+};
+
 interface ActivityRowProps {
 	trade: ReturnType<typeof useCreatorActivityFeed>['trades'][number];
 }
 
 function ActivityRow({ trade }: ActivityRowProps) {
 	const relativeTime = useRelativeTime(trade.timestamp);
+	const config = ACTIVITY_TYPE_CONFIG[trade.type] ?? ACTIVITY_TYPE_CONFIG.buy;
+	const Icon = config.icon;
+	const isTrade = trade.type === 'buy' || trade.type === 'sell';
 
 	return (
 		<div
@@ -24,26 +56,33 @@ function ActivityRow({ trade }: ActivityRowProps) {
 			className="flex items-center gap-4 rounded-xl border border-white/10 bg-white/[0.02] p-4"
 		>
 			<div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white/5">
-				{trade.type === 'buy' ? (
-					<ArrowUpRight className="size-4 text-emerald-400" />
-				) : (
-					<ArrowDownRight className="size-4 text-rose-400" />
-				)}
+				<Icon className={`size-4 ${config.iconClass}`} />
 			</div>
 			<div className="min-w-0 flex-1">
-				<div className="flex items-center gap-2">
-					<span className="font-semibold text-white">
-						{trade.type === 'buy' ? 'Buy' : 'Sell'}
-					</span>
-					<span className="text-white/40">•</span>
-					<span className="text-white/90">
-						{formatCreatorHandle(trade.traderHandle)}
-					</span>
+				<div className="flex flex-wrap items-center gap-2">
+					<span className="font-semibold text-white">{config.label}</span>
+					{isTrade && (
+						<>
+							<span className="text-white/40">•</span>
+							<span className="text-white/90">
+								{formatCreatorHandle(trade.traderHandle)}
+							</span>
+						</>
+					)}
+					{trade.actor && (
+						<ActionAttributionLabel attribution={trade.actor} prefix="by" />
+					)}
 				</div>
 				<div className="mt-1 flex items-center gap-3 text-xs text-white/50">
-					<span>{trade.amount} keys</span>
-					<span className="text-white/30">•</span>
-					<span>{trade.price} XLM</span>
+					{isTrade ? (
+						<>
+							<span>{trade.amount} keys</span>
+							<span className="text-white/30">•</span>
+							<span>{trade.price} XLM</span>
+						</>
+					) : (
+						<span>{trade.amount} XLM</span>
+					)}
 					<span className="text-white/30">•</span>
 					<span>{relativeTime}</span>
 				</div>
